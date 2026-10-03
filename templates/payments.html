@@ -3,7 +3,7 @@
 <h1>Payments & Receipts</h1>
 <div class="card">
   <h2>Record a payment</h2>
-  <p>Payments with an unrecognized learner reference or a payer phone that does not match the learner record require bursar verification.</p>
+  <p>Select a learner and the term for which the payment is being recorded. Payer phone numbers must be ten digits.</p>
   <form method="post" class="form-grid">
     <label>Amount (KSh, whole shillings)<input name="amount" type="number" min="1" step="1" required></label>
     <label>Channel
@@ -12,8 +12,31 @@
       </select>
     </label>
     <label>Transaction code<input name="transaction_code" autocomplete="off"></label>
-    <label>Payer phone<input name="payer_phone" type="tel" autocomplete="tel"></label>
-    <label>Learner payment code or admission number<input name="reference" required></label>
+    <label>Payer phone<input name="payer_phone" type="tel" inputmode="numeric" pattern="0[0-9]{9}" maxlength="10" minlength="10" placeholder="07XXXXXXXX" required></label>
+    <label>Learner
+      <select name="student_id" required>
+        <option value="">Select learner</option>
+        {% for student in students %}
+        <option value="{{ student.id }}">{{ student.full_name }} ({{ student.admission_number }})</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Academic year
+      <select name="academic_year" required>
+        <option value="">Select year</option>
+        {% for year in fee_periods|map(attribute='academic_year')|unique %}
+        <option value="{{ year }}">{{ year }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Term
+      <select name="term" required>
+        <option value="">Select term</option>
+        {% for period in fee_periods %}
+        <option value="{{ period.term }}" data-year="{{ period.academic_year }}">{{ period.academic_year }} · {{ period.term }}</option>
+        {% endfor %}
+      </select>
+    </label>
     <button type="submit">Record payment</button>
   </form>
 </div>
@@ -28,7 +51,7 @@
         <td>{{ payment.received_at }}</td>
         <td>KSh {{ "{:,}".format(payment.amount) }}</td>
         <td>{{ payment.channel }}</td>
-        <td>{{ payment.transaction_code or '-' }}</td>
+        <td>{{ payment.transaction_code or '-' }}<br>{{ payment.academic_year }} {{ payment.term }}</td>
         <td>
           {{ payment.reference }}
           {% if payment.student_name %}<br>{{ payment.student_name }} ({{ payment.admission_number }}){% endif %}
@@ -60,4 +83,18 @@
     </tbody>
   </table>
 </div>
+<script>
+  const yearField = document.querySelector('[name="academic_year"]');
+  const termField = document.querySelector('[name="term"]');
+  const filterTerms = () => {
+    Array.from(termField.options).forEach((option) => {
+      option.hidden = Boolean(option.dataset.year && option.dataset.year !== yearField.value);
+    });
+    const selected = termField.selectedOptions[0];
+    if (selected && selected.dataset.year && selected.dataset.year !== yearField.value) {
+      termField.value = '';
+    }
+  };
+  yearField.addEventListener('change', filterTerms);
+</script>
 {% endblock %}

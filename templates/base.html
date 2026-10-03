@@ -10,13 +10,14 @@
     <div class="app-shell">
       <aside class="sidebar">
         <div class="brand">
-          <img src="{{ school_settings.logo_url or '/static/sample-report-form.png' }}" alt="school logo" class="brand-logo">
+          {% if has_school_logo %}<img src="{{ school_settings.logo_url }}" alt="school logo" class="brand-logo">{% endif %}
           <div>
             <strong>{{ school_settings.name }}</strong>
             <p>{{ school_settings.motto }}</p>
           </div>
         </div>
         <nav>
+          {% if is_super_admin %}
           <div class="school-switcher">
             <strong>Active School</strong>
             <select onchange="window.location.href='/switch-school/' + this.value">
@@ -25,17 +26,30 @@
               {% endfor %}
             </select>
           </div>
+          {% endif %}
           <a href="{{ url_for('index') }}">Dashboard</a>
+          {% if is_super_admin or current_role in ['admin', 'registrar'] %}
           <a href="{{ url_for('students') }}">Student Management</a>
+          {% endif %}
+          {% if is_super_admin or current_role in ['admin', 'finance_officer'] %}
           <a href="{{ url_for('fees') }}">Fee Structure</a>
           <a href="{{ url_for('payments') }}">Payments & Receipts</a>
+          {% endif %}
+          {% if is_super_admin or current_role == 'admin' %}
           <a href="{{ url_for('teachers') }}">Teacher Management</a>
-          <a href="{{ url_for('subjects') }}">Subject Management</a>
+          <a href="{{ url_for('subjects') }}">Learning Areas & Teaching Loads</a>
+          {% endif %}
+          {% if is_super_admin or current_role in ['admin', 'exam_officer'] %}
           <a href="{{ url_for('exams') }}">Exam Management</a>
+          {% endif %}
+          {% if is_super_admin or current_role in ['admin', 'teacher', 'exam_officer'] %}
           <a href="{{ url_for('marks') }}">Marks Entry</a>
           <a href="{{ url_for('reports') }}">Reports</a>
           <a href="{{ url_for('class_analysis') }}">Class Analysis</a>
+          {% endif %}
+          {% if is_super_admin or current_role == 'admin' %}
           <a href="{{ url_for('settings') }}">Branding</a>
+          {% endif %}
           {% if session.get('teacher_logged_in') %}
           <a href="{{ url_for('logout') }}">Logout</a>
           {% endif %}

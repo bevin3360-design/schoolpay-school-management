@@ -1,0 +1,62 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="report-card {% if print_mode %}print-mode{% endif %}">
+  <div class="report-header">
+    <div><h1>{{ school_settings.name }}</h1><p>{{ school_settings.motto }}</p></div>
+    {% if has_school_logo %}<img src="{{ school_settings.logo_url }}" alt="school logo" class="report-logo">{% endif %}
+  </div>
+  <h2>{{ 'Points Result' if report_view == 'points' else 'Marks Result' }}</h2>
+  <p><strong>Assessment:</strong> {{ report.exam_name }}</p>
+  <div class="report-summary-grid">
+    <div>
+      <p><strong>Learner:</strong> {{ report.student.full_name }}</p>
+      <p><strong>Admission:</strong> {{ report.student.admission_number }}</p>
+      <p><strong>School stage:</strong> {{ report.student.school_stage }}</p>
+      <p><strong>Grade / class:</strong> {{ report.student.grade }} / {{ report.student.class_name }}</p>
+      <p><strong>Parent:</strong> {{ report.student.parent_name }} ({{ report.student.parent_relationship or 'Guardian' }})</p>
+    </div>
+    <div>
+      <p><strong>Overall mark average:</strong> {{ report.overall_average }}%</p>
+      <p><strong>Overall CBE band:</strong> {{ report.overall_grade.grade }} · {{ report.overall_grade.points }} points</p>
+      <p><strong>Class position:</strong> {{ report.position }}</p>
+    </div>
+  </div>
+  {% if report_view == 'points' %}
+  <h3>Learning-area points</h3>
+  <table>
+    <thead><tr><th>Learning area</th><th>Average mark</th><th>CBE grade</th><th>Points</th></tr></thead>
+    <tbody>
+      {% for item in report.subject_summary %}
+      <tr><td>{{ item.name }}</td><td>{{ item.average }}%</td><td>{{ item.grade.grade }}</td><td>{{ item.points }}</td></tr>
+      {% else %}<tr><td colspan="4">No marks have been entered for this learner.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <h3>Assessment marks</h3>
+  <table>
+    <thead><tr><th>Learning area</th><th>Assessment</th><th>Mark</th><th>Percent</th><th>CBE grade</th><th>Points</th></tr></thead>
+    <tbody>
+      {% for item in report.mark_entries %}
+      <tr><td>{{ item.name }}</td><td>{{ item.exam_name }}</td><td>{{ item.score }} / {{ item.out_of }}</td><td>{{ item.percentage }}%</td><td>{{ item.grade }}</td><td>{{ item.points }}</td></tr>
+      {% else %}<tr><td colspan="6">No marks have been entered for this learner.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  <div class="insight-grid">
+    <div class="card"><h3>Strengths</h3><ul>{% for area in report.strength_subjects %}<li>{{ area }}</li>{% else %}<li>Keep building confidence across all learning areas.</li>{% endfor %}</ul></div>
+    <div class="card"><h3>Areas for growth</h3><ul>{% for area in report.weak_subjects %}<li>{{ area }}</li>{% else %}<li>Continue practising across all learning areas.</li>{% endfor %}</ul></div>
+  </div>
+  <div class="card remark-block"><h3>Teacher comment</h3><p>{{ report.remark }}</p></div>
+  {% if school_settings.signature_url %}<div class="signature-block"><img src="{{ school_settings.signature_url }}" alt="teacher signature" class="signature-img"></div>{% endif %}
+  {% if not print_mode %}
+  <div class="actions">
+    <a class="button" href="{{ url_for('report_card', student_id=report.student.id, exam_id=selected_exam_id, view='marks') }}">View marks</a>
+    <a class="button" href="{{ url_for('report_card', student_id=report.student.id, exam_id=selected_exam_id, view='points') }}">View points</a>
+    <a class="button" target="_blank" href="{{ url_for('print_report', student_id=report.student.id, exam_id=selected_exam_id, view='marks') }}">Print marks</a>
+    <a class="button" target="_blank" href="{{ url_for('print_report', student_id=report.student.id, exam_id=selected_exam_id, view='points') }}">Print points</a>
+    <a class="button" href="{{ url_for('download_report', student_id=report.student.id, exam_id=selected_exam_id, view='marks') }}">Download marks</a>
+    <a class="button" href="{{ url_for('download_report', student_id=report.student.id, exam_id=selected_exam_id, view='points') }}">Download points</a>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -6,20 +6,50 @@
   <form method="post" class="form-grid">
     <label>Name<input name="name" required></label>
     <label>Type<select name="exam_type"><option>Opener</option><option>Midterm</option><option>End Term</option><option>Mock</option></select></label>
-    <label>Term<input name="term" value="Term 1"></label>
-    <label>Grade level<input name="grade_level" value="All"></label>
+    <label>Term<select name="term" required><option>Term 1</option><option>Term 2</option><option>Term 3</option></select></label>
+    <label>School stage
+      <select name="school_stage" id="exam-stage">
+        <option value="All">All stages</option><option>Pre-primary</option><option>Primary</option><option>Junior School</option><option>Senior School</option>
+      </select>
+    </label>
+    <label>Grade
+      <select name="grade_level" id="exam-grade" required>
+        <option value="All">All grades</option>
+        {% for grade in ['Playgroup', 'PP1', 'PP2'] %}<option data-stage="Pre-primary">{{ grade }}</option>{% endfor %}
+        {% for n in range(1, 7) %}<option data-stage="Primary">Grade {{ n }}</option>{% endfor %}
+        {% for n in range(7, 10) %}<option data-stage="Junior School">Grade {{ n }}</option>{% endfor %}
+        {% for n in range(10, 13) %}<option data-stage="Senior School">Grade {{ n }}</option>{% endfor %}
+      </select>
+    </label>
     <button type="submit">Create Exam</button>
   </form>
 </div>
 <div class="card">
   <h2>Exam List</h2>
+  <p>Download the school-branded Excel marks template for each assessment. You can also upload that .xlsx file into Google Sheets and export it back to Excel to import scores here.</p>
   <table>
-    <thead><tr><th>Name</th><th>Type</th><th>Term</th><th>Grade</th></tr></thead>
+    <thead><tr><th>Name</th><th>Type</th><th>Term</th><th>Grade</th><th>Marks template</th></tr></thead>
     <tbody>
       {% for exam in exams %}
-      <tr><td>{{ exam.name }}</td><td>{{ exam.exam_type }}</td><td>{{ exam.term }}</td><td>{{ exam.grade_level }}</td></tr>
-      {% endfor %}
+      <tr>
+        <td>{{ exam.name }}</td><td>{{ exam.exam_type }}</td><td>{{ exam.term }}</td><td>{{ exam.grade_level }}</td>
+        <td><a href="{{ url_for('download_marks_template', exam_id=exam.id) }}">Download Excel template</a> · <a href="https://docs.google.com/spreadsheets/create" target="_blank" rel="noopener">Open Google Sheets</a></td>
+      </tr>
+      {% else %}<tr><td colspan="5">No exams have been created.</td></tr>{% endfor %}
     </tbody>
   </table>
 </div>
+<script>
+  const stageField = document.querySelector('#exam-stage');
+  const gradeField = document.querySelector('#exam-grade');
+  stageField.addEventListener('change', () => {
+    const options = Array.from(gradeField.options);
+    options.forEach((option) => {
+      option.hidden = Boolean(option.dataset.stage && option.dataset.stage !== stageField.value);
+    });
+    if (gradeField.selectedOptions[0].dataset.stage && gradeField.selectedOptions[0].dataset.stage !== stageField.value) {
+      gradeField.value = 'All';
+    }
+  });
+</script>
 {% endblock %}

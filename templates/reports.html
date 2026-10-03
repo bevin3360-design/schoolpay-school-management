@@ -3,8 +3,19 @@
 <h1>Reports</h1>
 <div class="card">
   <h2>Student Overview</h2>
+  <form method="get" class="form-grid">
+    <label>Assessment
+      <select name="exam_id">
+        <option value="">All recorded assessments</option>
+        {% for exam in exams %}
+        <option value="{{ exam.id }}" {% if exam.id == selected_exam_id %}selected{% endif %}>{{ exam.name }} ({{ exam.term }} · {{ exam.grade_level }})</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit">Show results</button>
+  </form>
   <table>
-    <thead><tr><th>Student</th><th>Grade</th><th>Average</th><th>Grade</th><th>Position</th><th>Action</th></tr></thead>
+    <thead><tr><th>Learner</th><th>Grade</th><th>Average</th><th>CBE Band</th><th>Points</th><th>Position</th><th>Actions</th></tr></thead>
     <tbody>
       {% for report in student_reports %}
       <tr>
@@ -12,8 +23,16 @@
         <td>{{ report.student.grade }}</td>
         <td>{{ report.overall_average }}</td>
         <td>{{ report.overall_grade.grade }}</td>
+        <td>{{ report.overall_grade.points }}</td>
         <td>{{ report.position }}</td>
-        <td><a href="{{ url_for('report_card', student_id=report.student.id) }}">Open</a> | <a href="{{ url_for('print_report', student_id=report.student.id) }}" target="_blank">Print</a></td>
+        <td>
+          <a href="{{ url_for('report_card', student_id=report.student.id, exam_id=selected_exam_id, view='marks') }}">Marks</a> ·
+          <a href="{{ url_for('report_card', student_id=report.student.id, exam_id=selected_exam_id, view='points') }}">Points</a><br>
+          <a target="_blank" href="{{ url_for('print_report', student_id=report.student.id, exam_id=selected_exam_id, view='marks') }}">Print marks</a> ·
+          <a target="_blank" href="{{ url_for('print_report', student_id=report.student.id, exam_id=selected_exam_id, view='points') }}">Print points</a><br>
+          <a href="{{ url_for('download_report', student_id=report.student.id, exam_id=selected_exam_id, view='marks') }}">Download marks</a> ·
+          <a href="{{ url_for('download_report', student_id=report.student.id, exam_id=selected_exam_id, view='points') }}">Download points</a>
+        </td>
       </tr>
       {% endfor %}
     </tbody>

@@ -1,13 +1,17 @@
 from datetime import datetime
+from io import BytesIO
 import os
 import re
 import sqlite3
+import zipfile
+import xml.etree.ElementTree as ET
 from functools import wraps
 from typing import Any, Dict, List
 from werkzeug.utils import secure_filename
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Font
 
-from flask import Flask, flash, redirect, render_template, request, session, url_for
+from flask import Flask, abort, flash, has_request_context, redirect, render_template, request, send_file, session, url_for
 
 app = Flask(__name__)
 app.secret_key = "school-report-secret"
@@ -54,9 +58,11 @@ def init_db() -> None:
                 full_name TEXT NOT NULL,
                 gender TEXT,
                 grade TEXT NOT NULL,
+                school_stage TEXT,
                 class_name TEXT,
                 dob TEXT,
                 parent_name TEXT,
+                parent_relationship TEXT DEFAULT 'Guardian',
                 parent_contact TEXT,
                 school_id INTEGER DEFAULT 1,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -97,6 +103,18 @@ def init_db() -> None:
                 FOREIGN KEY(school_id) REFERENCES schools(id)
             );
 
+            CREATE TABLE IF NOT EXISTS teacher_learning_areas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                school_id INTEGER NOT NULL,
+                teacher_id INTEGER NOT NULL,
+                subject_id INTEGER NOT NULL,
+                grade TEXT NOT NULL,
+                UNIQUE(teacher_id, subject_id, grade),
+                FOREIGN KEY(school_id) REFERENCES schools(id),
+                FOREIGN KEY(teacher_id) REFERENCES teachers(id),
+                FOREIGN KEY(subject_id) REFERENCES subjects(id)
+            );
+
             CREATE TABLE IF NOT EXISTS fee_items (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 school_id INTEGER NOT NULL,
@@ -134,6 +152,8 @@ def init_db() -> None:
                 transaction_code TEXT,
                 payer_phone TEXT,
                 reference TEXT NOT NULL,
+                academic_year TEXT,
+                term TEXT,
                 student_id INTEGER,
                 suggested_student_id INTEGER,
                 status TEXT NOT NULL CHECK(status IN ('matched', 'pending')),
@@ -196,6 +216,14 @@ def init_db() -> None:
             conn.execute("ALTER TABLE students ADD COLUMN school_id INTEGER DEFAULT 1")
         if not table_has_column("students", "payment_code"):
             conn.execute("ALTER TABLE students ADD COLUMN payment_code TEXT")
+        if not table_has_column("students", "school_stage"):
+            conn.execute("ALTER TABLE students ADD COLUMN school_stage TEXT")
+        if not table_has_column("students", "parent_relationship"):
+            conn.execute("ALTER TABLE students ADD COLUMN parent_relationship TEXT DEFAULT 'Guardian'")
+        if not table_has_column("payments", "academic_year"):
+            conn.execute("ALTER TABLE payments ADD COLUMN academic_year TEXT")
+        if not table_has_column("payments", "term"):
+            conn.execute("ALTER TABLE payments ADD COLUMN term TEXT")
         if not table_has_column("receipts", "previous_balance"):
             conn.execute("ALTER TABLE receipts ADD COLUMN previous_balance INTEGER NOT NULL DEFAULT 0")
         if not table_has_column("receipts", "new_balance"):
@@ -212,6 +240,18 @@ def init_db() -> None:
         conn.execute("UPDATE subjects SET school_id = 1 WHERE school_id IS NULL")
         conn.execute("UPDATE exams SET school_id = 1 WHERE school_id IS NULL")
         conn.execute("UPDATE marks SET school_id = 1 WHERE school_id IS NULL")
+        conn.execute(
+            """
+            UPDATE students
+            SET school_stage = CASE
+                WHEN grade IN ('Playgroup', 'PP1', 'PP2') THEN 'Pre-primary'
+                WHEN grade IN ('Grade 7', 'Grade 8', 'Grade 9') THEN 'Junior School'
+                WHEN grade IN ('Grade 10', 'Grade 11', 'Grade 12') THEN 'Senior School'
+                ELSE 'Primary'
+            END
+            WHERE school_stage IS NULL OR school_stage = ''
+            """
+        )
 
         conn.execute(
             "INSERT OR IGNORE INTO schools (id, name, motto, logo_url, signature_url, report_template) VALUES (1, ?, ?, ?, ?, ?)",
@@ -246,11 +286,21 @@ def init_db() -> None:
             ("English", "ENG", "All"),
             ("Kiswahili", "KIS", "All"),
             ("Mathematics", "MATH", "All"),
-            ("Science", "SCI", "All"),
+            ("Science and Technology", "SCT", "All"),
+            ("Integrated Science", "SCI", "All"),
             ("Social Studies", "SST", "All"),
+            ("Agriculture", "AGR", "All"),
+            ("Home Science", "HSC", "All"),
+            ("Business Studies", "BUS", "All"),
+            ("Computer Science", "CS", "All"),
+            ("Pre-Technical Studies", "PTS", "All"),
             ("Creative Arts", "CA", "All"),
+            ("Life Skills Education", "LSE", "All"),
+            ("Health Education", "HE", "All"),
+            ("Physical and Health Education", "PHE", "All"),
             ("Religious Education", "RE", "All"),
-            ("Physical Education", "PE", "All"),
+            ("Indigenous Languages", "IL", "All"),
+            ("Kenya Sign Language", "KSL", "All"),
         ]
         for subject in default_subjects:
             conn.execute(
@@ -334,6 +384,18 @@ def init_db() -> None:
                 "INSERT OR IGNORE INTO students (admission_number, full_name, gender, grade, class_name, dob, parent_name, parent_contact, school_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (*student, 1),
             )
+        conn.execute(
+            """
+            UPDATE students
+            SET school_stage = CASE
+                WHEN grade IN ('Playgroup', 'PP1', 'PP2') THEN 'Pre-primary'
+                WHEN grade IN ('Grade 7', 'Grade 8', 'Grade 9') THEN 'Junior School'
+                WHEN grade IN ('Grade 10', 'Grade 11', 'Grade 12') THEN 'Senior School'
+                ELSE 'Primary'
+            END
+            WHERE school_stage IS NULL OR school_stage = ''
+            """
+        )
 
         students_without_payment_codes = conn.execute(
             "SELECT id, school_id FROM students WHERE payment_code IS NULL OR payment_code = ''"
@@ -380,6 +442,22 @@ def normalize_phone(value: str | None) -> str:
     return digits
 
 
+def stage_for_grade(grade: str) -> str:
+    if grade in {"Playgroup", "PP1", "PP2"}:
+        return "Pre-primary"
+    if grade in {"Grade 1", "Grade 2", "Grade 3", "Grade 4", "Grade 5", "Grade 6"}:
+        return "Primary"
+    if grade in {"Grade 7", "Grade 8", "Grade 9"}:
+        return "Junior School"
+    if grade in {"Grade 10", "Grade 11", "Grade 12"}:
+        return "Senior School"
+    return ""
+
+
+def valid_student_stage(grade: str, school_stage: str) -> bool:
+    return school_stage == stage_for_grade(grade)
+
+
 def add_audit_log(
     conn: sqlite3.Connection,
     school_id: int,
@@ -411,21 +489,31 @@ def create_payment_receipt(
         return int(receipt["id"])
 
     payment = conn.execute(
-        "SELECT student_id, amount FROM payments WHERE id = ? AND school_id = ? AND status = 'matched'",
+        "SELECT student_id, amount, academic_year, term FROM payments WHERE id = ? AND school_id = ? AND status = 'matched'",
         (payment_id, school_id),
     ).fetchone()
     if not payment:
         raise ValueError("Only a matched payment can receive a receipt.")
     charges = conn.execute(
-        "SELECT COALESCE(SUM(amount), 0) FROM fee_charges WHERE student_id = ? AND school_id = ?",
-        (payment["student_id"], school_id),
+        """
+        SELECT COALESCE(SUM(amount), 0) FROM fee_charges
+        WHERE student_id = ? AND school_id = ? AND academic_year = ? AND term = ?
+        """,
+        (payment["student_id"], school_id, payment["academic_year"], payment["term"]),
     ).fetchone()[0]
     other_payments = conn.execute(
         """
         SELECT COALESCE(SUM(amount), 0) FROM payments
-        WHERE student_id = ? AND school_id = ? AND status = 'matched' AND id != ?
+        WHERE student_id = ? AND school_id = ? AND status = 'matched'
+          AND academic_year = ? AND term = ? AND id != ?
         """,
-        (payment["student_id"], school_id, payment_id),
+        (
+            payment["student_id"],
+            school_id,
+            payment["academic_year"],
+            payment["term"],
+            payment_id,
+        ),
     ).fetchone()[0]
     previous_balance = int(charges) - int(other_payments)
     new_balance = previous_balance - int(payment["amount"])
@@ -461,6 +549,168 @@ def create_payment_receipt(
     return receipt_id
 
 
+def embed_school_logo(workbook_stream: BytesIO, logo_url: str | None) -> BytesIO:
+    if not logo_url or not logo_url.startswith("/static/"):
+        workbook_stream.seek(0)
+        return workbook_stream
+    logo_path = os.path.join(
+        app.root_path, logo_url.lstrip("/").replace("/", os.sep)
+    )
+    extension = os.path.splitext(logo_path)[1].lower().lstrip(".")
+    image_types = {
+        "png": "image/png",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+    }
+    if extension not in image_types or not os.path.isfile(logo_path):
+        workbook_stream.seek(0)
+        return workbook_stream
+
+    main_ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    rel_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    package_rel_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
+    drawing_ns = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+    drawing_main_ns = "http://schemas.openxmlformats.org/drawingml/2006/main"
+    ET.register_namespace("", main_ns)
+    ET.register_namespace("r", rel_ns)
+    ET.register_namespace("xdr", drawing_ns)
+    ET.register_namespace("a", drawing_main_ns)
+
+    workbook_stream.seek(0)
+    output = BytesIO()
+    logo_filename = f"school-logo.{extension}"
+    with zipfile.ZipFile(workbook_stream, "r") as source:
+        worksheet_root = ET.fromstring(source.read("xl/worksheets/sheet1.xml"))
+        ET.SubElement(worksheet_root, f"{{{main_ns}}}drawing", {f"{{{rel_ns}}}id": "rId1"})
+        worksheet_xml = ET.tostring(
+            worksheet_root, encoding="utf-8", xml_declaration=True
+        )
+        worksheet_relationships = ET.Element(
+            f"{{{package_rel_ns}}}Relationships"
+        )
+        ET.SubElement(
+            worksheet_relationships,
+            f"{{{package_rel_ns}}}Relationship",
+            {
+                "Id": "rId1",
+                "Type": f"{rel_ns}/drawing",
+                "Target": "../drawings/drawing1.xml",
+            },
+        )
+
+        width_emu = 72 * 9525
+        height_emu = 54 * 9525
+        anchor = ET.Element(f"{{{drawing_ns}}}wsDr")
+        one_cell_anchor = ET.SubElement(anchor, f"{{{drawing_ns}}}oneCellAnchor")
+        start = ET.SubElement(one_cell_anchor, f"{{{drawing_ns}}}from")
+        for tag, value in (("col", "0"), ("colOff", "0"), ("row", "0"), ("rowOff", "0")):
+            ET.SubElement(start, f"{{{drawing_ns}}}{tag}").text = value
+        ET.SubElement(
+            one_cell_anchor,
+            f"{{{drawing_ns}}}ext",
+            {"cx": str(width_emu), "cy": str(height_emu)},
+        )
+        picture = ET.SubElement(one_cell_anchor, f"{{{drawing_ns}}}pic")
+        non_visual = ET.SubElement(picture, f"{{{drawing_ns}}}nvPicPr")
+        ET.SubElement(
+            non_visual,
+            f"{{{drawing_ns}}}cNvPr",
+            {"id": "1", "name": "School logo"},
+        )
+        ET.SubElement(non_visual, f"{{{drawing_ns}}}cNvPicPr")
+        fill = ET.SubElement(picture, f"{{{drawing_ns}}}blipFill")
+        ET.SubElement(
+            fill,
+            f"{{{drawing_main_ns}}}blip",
+            {f"{{{rel_ns}}}embed": "rId1"},
+        )
+        stretch = ET.SubElement(fill, f"{{{drawing_main_ns}}}stretch")
+        ET.SubElement(stretch, f"{{{drawing_main_ns}}}fillRect")
+        shape = ET.SubElement(picture, f"{{{drawing_ns}}}spPr")
+        transform = ET.SubElement(shape, f"{{{drawing_main_ns}}}xfrm")
+        ET.SubElement(
+            transform, f"{{{drawing_main_ns}}}off", {"x": "0", "y": "0"}
+        )
+        ET.SubElement(
+            transform,
+            f"{{{drawing_main_ns}}}ext",
+            {"cx": str(width_emu), "cy": str(height_emu)},
+        )
+        geometry = ET.SubElement(
+            shape,
+            f"{{{drawing_main_ns}}}prstGeom",
+            {"prst": "rect"},
+        )
+        ET.SubElement(geometry, f"{{{drawing_main_ns}}}avLst")
+        ET.SubElement(one_cell_anchor, f"{{{drawing_ns}}}clientData")
+        drawing_xml = ET.tostring(anchor, encoding="utf-8", xml_declaration=True)
+
+        drawing_relationships = ET.Element(
+            f"{{{package_rel_ns}}}Relationships"
+        )
+        ET.SubElement(
+            drawing_relationships,
+            f"{{{package_rel_ns}}}Relationship",
+            {
+                "Id": "rId1",
+                "Type": f"{rel_ns}/image",
+                "Target": f"../media/{logo_filename}",
+            },
+        )
+        content_types = ET.fromstring(source.read("[Content_Types].xml"))
+        if not any(
+            element.attrib.get("Extension") == extension
+            for element in content_types
+        ):
+            ET.SubElement(
+                content_types,
+                "{http://schemas.openxmlformats.org/package/2006/content-types}Default",
+                {"Extension": extension, "ContentType": image_types[extension]},
+            )
+        ET.SubElement(
+            content_types,
+            "{http://schemas.openxmlformats.org/package/2006/content-types}Override",
+            {
+                "PartName": "/xl/drawings/drawing1.xml",
+                "ContentType": "application/vnd.openxmlformats-officedocument.drawing+xml",
+            },
+        )
+        content_types_xml = ET.tostring(
+            content_types, encoding="utf-8", xml_declaration=True
+        )
+        with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as destination:
+            for item in source.infolist():
+                if item.filename == "xl/worksheets/sheet1.xml":
+                    data = worksheet_xml
+                elif item.filename == "[Content_Types].xml":
+                    data = content_types_xml
+                else:
+                    data = source.read(item.filename)
+                destination.writestr(item, data)
+            destination.writestr(
+                "xl/worksheets/_rels/sheet1.xml.rels",
+                ET.tostring(
+                    worksheet_relationships,
+                    encoding="utf-8",
+                    xml_declaration=True,
+                ),
+            )
+            destination.writestr(
+                "xl/drawings/drawing1.xml", drawing_xml
+            )
+            destination.writestr(
+                "xl/drawings/_rels/drawing1.xml.rels",
+                ET.tostring(
+                    drawing_relationships,
+                    encoding="utf-8",
+                    xml_declaration=True,
+                ),
+            )
+            destination.write(logo_path, f"xl/media/{logo_filename}")
+    output.seek(0)
+    return output
+
+
 def teacher_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
@@ -470,6 +720,32 @@ def teacher_required(view):
         return view(*args, **kwargs)
 
     return wrapped
+
+
+def role_required(*allowed_roles: str):
+    def decorate(view):
+        @wraps(view)
+        def wrapped(*args, **kwargs):
+            if not session.get("teacher_logged_in"):
+                flash("Please sign in before using the school records system.")
+                return redirect(url_for("login"))
+            with get_db() as conn:
+                teacher = conn.execute(
+                    "SELECT role, is_super_admin FROM teachers WHERE id = ?",
+                    (session.get("teacher_id"),),
+                ).fetchone()
+            if not teacher:
+                session.clear()
+                flash("Your account is no longer available. Please sign in again.")
+                return redirect(url_for("login"))
+            session["teacher_role"] = teacher["role"]
+            if teacher["is_super_admin"] or teacher["role"] in allowed_roles:
+                return view(*args, **kwargs)
+            abort(403)
+
+        return wrapped
+
+    return decorate
 
 
 def teacher_can_manage_school(teacher_id: int | None, school_id: int) -> bool:
@@ -521,21 +797,26 @@ def get_report_template_name(grade_label: str) -> str:
 
 
 def get_subject_grade_rubric(grade_level: str, percentage: float) -> Dict[str, Any]:
-    if normalize_grade_level(grade_level) == "kjsea":
-        if percentage >= 61:
-            return {"grade": "EE1", "descriptor": "Excellent", "band": "7", "band_name": "Exceeding Expectation 1"}
-        if percentage >= 55:
-            return {"grade": "EE2", "descriptor": "Very Good", "band": "6", "band_name": "Exceeding Expectation 2"}
-        if percentage >= 49:
-            return {"grade": "ME1", "descriptor": "Good", "band": "5", "band_name": "Meeting Expectation 1"}
-        if percentage >= 43:
-            return {"grade": "ME2", "descriptor": "Satisfactory", "band": "4", "band_name": "Meeting Expectation 2"}
-        if percentage >= 37:
-            return {"grade": "AE1", "descriptor": "Approaching", "band": "3", "band_name": "Approaching Expectation 1"}
-        if percentage >= 31:
-            return {"grade": "AE2", "descriptor": "Approaching", "band": "2", "band_name": "Approaching Expectation 2"}
-        return {"grade": "BE", "descriptor": "Below Expectation", "band": "1", "band_name": "Below Expectation"}
-    return get_grade_info(grade_level, percentage)
+    bands = [
+        (90, "EE1", 8, "Exceeding Expectation 1"),
+        (75, "EE2", 7, "Exceeding Expectation 2"),
+        (58, "ME1", 6, "Meeting Expectation 1"),
+        (41, "ME2", 5, "Meeting Expectation 2"),
+        (31, "AE1", 4, "Approaching Expectation 1"),
+        (21, "AE2", 3, "Approaching Expectation 2"),
+        (11, "BE1", 2, "Below Expectation 1"),
+        (0, "BE2", 1, "Below Expectation 2"),
+    ]
+    for minimum, grade, points, descriptor in bands:
+        if percentage >= minimum:
+            return {
+                "grade": grade,
+                "descriptor": descriptor,
+                "band": str(points),
+                "points": points,
+                "band_name": descriptor,
+            }
+    return {"grade": "BE2", "descriptor": "Below Expectation 2", "band": "1", "points": 1, "band_name": "Below Expectation 2"}
 
 
 def normalize_grade_level(grade_label: str) -> str:
@@ -604,54 +885,148 @@ def generate_personalized_remark(student_name: str, overall_average: float, stre
     )
 
 
-def build_student_report(student_id: int) -> Dict[str, Any]:
+def build_student_report(student_id: int, exam_id: int | None = None) -> Dict[str, Any]:
     school_id = get_active_school_id()
+    report_role = session.get("teacher_role", "") if has_request_context() else ""
+    report_teacher_id = session.get("teacher_id") if has_request_context() else None
     with get_db() as conn:
         student = conn.execute("SELECT * FROM students WHERE id = ? AND school_id = ?", (student_id, school_id)).fetchone()
         if not student:
             raise ValueError("Student not found")
         marks_rows = conn.execute(
             """
-            SELECT m.*, s.name AS subject_name, s.short_name AS short_name
+            SELECT m.*, s.name AS subject_name, s.short_name AS short_name,
+                   e.name AS exam_name, e.id AS selected_exam_id
             FROM marks m
             JOIN subjects s ON s.id = m.subject_id
+            JOIN exams e ON e.id = m.exam_id
             WHERE m.student_id = ?
+              AND m.school_id = ?
+              AND (? IS NULL OR m.exam_id = ?)
+              AND (
+                  ? != 'teacher'
+                  OR EXISTS (
+                      SELECT 1 FROM teacher_learning_areas a
+                      WHERE a.school_id = m.school_id
+                        AND a.teacher_id = ?
+                        AND a.subject_id = m.subject_id
+                        AND a.grade = ?
+                  )
+              )
             ORDER BY s.name
             """,
-            (student_id,),
+            (
+                student_id,
+                school_id,
+                exam_id,
+                exam_id,
+                report_role,
+                report_teacher_id,
+                student["grade"],
+            ),
         ).fetchall()
 
     subject_scores: Dict[str, List[float]] = {}
     for row in marks_rows:
-        subject_scores.setdefault(row["subject_name"], []).append(float(row["marks_obtained"]))
+        out_of = float(row["out_of"] or 100)
+        score = float(row["marks_obtained"]) / out_of * 100 if out_of else 0
+        subject_scores.setdefault(row["subject_name"], []).append(score)
 
     subject_summary: List[Dict[str, Any]] = []
     for name, values in sorted(subject_scores.items()):
         average = round(sum(values) / len(values), 1)
+        rubric = get_subject_grade_rubric(student["grade"], average)
         subject_summary.append(
             {
                 "name": name,
                 "average": average,
-                "grade": get_subject_grade_rubric(student["grade"], average),
+                "grade": rubric,
+                "points": rubric["points"],
             }
         )
 
     overall_average = round(sum(item["average"] for item in subject_summary) / len(subject_summary), 1) if subject_summary else 0.0
     overall_grade = get_subject_grade_rubric(student["grade"], overall_average)
+    mark_entries = []
+    for row in marks_rows:
+        out_of = float(row["out_of"] or 100)
+        percentage = round(float(row["marks_obtained"]) / out_of * 100, 1) if out_of else 0
+        rubric = get_subject_grade_rubric(student["grade"], percentage)
+        mark_entries.append(
+            {
+                "name": row["subject_name"],
+                "exam_name": row["exam_name"],
+                "score": float(row["marks_obtained"]),
+                "out_of": out_of,
+                "percentage": percentage,
+                "points": rubric["points"],
+                "grade": rubric["grade"],
+            }
+        )
 
     with get_db() as conn:
         class_students = conn.execute(
-            "SELECT id, grade, class_name FROM students WHERE grade = ? AND class_name = ? AND school_id = ?",
-            (student["grade"], student["class_name"], school_id),
+            """
+            SELECT id FROM students
+            WHERE grade = ? AND class_name = ? AND school_id = ?
+              AND (
+                  ? != 'teacher'
+                  OR EXISTS (
+                      SELECT 1 FROM teacher_learning_areas a
+                      WHERE a.school_id = students.school_id
+                        AND a.teacher_id = ?
+                        AND a.grade = students.grade
+                  )
+              )
+            """,
+            (student["grade"], student["class_name"], school_id, report_role, report_teacher_id),
+        ).fetchall()
+        peer_subject_rows = conn.execute(
+            """
+            SELECT m.student_id, m.subject_id,
+                   AVG(CASE WHEN COALESCE(m.out_of, 100) > 0
+                       THEN m.marks_obtained * 100.0 / m.out_of ELSE 0 END) AS average
+            FROM marks m
+            JOIN students st ON st.id = m.student_id AND st.school_id = m.school_id
+            WHERE st.grade = ? AND st.class_name = ? AND st.school_id = ?
+              AND (? IS NULL OR m.exam_id = ?)
+              AND (
+                  ? != 'teacher'
+                  OR EXISTS (
+                      SELECT 1 FROM teacher_learning_areas a
+                      WHERE a.school_id = m.school_id
+                        AND a.teacher_id = ?
+                        AND a.subject_id = m.subject_id
+                        AND a.grade = st.grade
+                  )
+              )
+            GROUP BY m.student_id, m.subject_id
+            """,
+            (
+                student["grade"],
+                student["class_name"],
+                school_id,
+                exam_id,
+                exam_id,
+                report_role,
+                report_teacher_id,
+            ),
         ).fetchall()
 
-    positions: List[Dict[str, Any]] = []
-    for roster_student in class_students:
-        roster_report = build_student_report(roster_student["id"]) if roster_student["id"] != student_id else None
-        if roster_report is None:
-            positions.append({"id": roster_student["id"], "average": overall_average})
-        else:
-            positions.append({"id": roster_student["id"], "average": roster_report["overall_average"]})
+    averages_by_student: Dict[int, List[float]] = {}
+    for row in peer_subject_rows:
+        averages_by_student.setdefault(int(row["student_id"]), []).append(float(row["average"]))
+    positions = [
+        {
+            "id": int(roster_student["id"]),
+            "average": (
+                round(sum(averages_by_student[int(roster_student["id"])]) / len(averages_by_student[int(roster_student["id"])]), 1)
+                if averages_by_student.get(int(roster_student["id"]))
+                else 0.0
+            ),
+        }
+        for roster_student in class_students
+    ]
 
     positions_sorted = sorted(positions, key=lambda item: item["average"], reverse=True)
     current_position = 1
@@ -660,8 +1035,8 @@ def build_student_report(student_id: int) -> Dict[str, Any]:
             current_position = index + 1
             break
 
-    strength_subjects = [item["name"] for item in subject_summary if item["average"] >= 70]
-    weak_subjects = [item["name"] for item in subject_summary if item["average"] < 50]
+    strength_subjects = [item["name"] for item in subject_summary if item["average"] >= 75]
+    weak_subjects = [item["name"] for item in subject_summary if item["average"] < 41]
     if not weak_subjects:
         weak_subjects = ["core concepts and revision habits"]
 
@@ -670,6 +1045,7 @@ def build_student_report(student_id: int) -> Dict[str, Any]:
     return {
         "student": dict(student),
         "subject_summary": subject_summary,
+        "mark_entries": mark_entries,
         "overall_average": overall_average,
         "overall_grade": overall_grade,
         "position": current_position,
@@ -678,14 +1054,24 @@ def build_student_report(student_id: int) -> Dict[str, Any]:
         "remark": remark,
         "performance_band": overall_grade["band_name"] or overall_grade["descriptor"],
         "report_template": get_report_template_name(student["grade"]),
+        "exam_name": marks_rows[0]["exam_name"] if marks_rows else "All recorded exams",
     }
 
 
 @app.context_processor
 def inject_school_settings():
+    teacher = None
+    if session.get("teacher_id"):
+        with get_db() as conn:
+            teacher = conn.execute(
+                "SELECT role, is_super_admin FROM teachers WHERE id = ?",
+                (session["teacher_id"],),
+            ).fetchone()
     return {
         "school_settings": get_current_school(),
         "available_schools": get_available_schools(),
+        "current_role": teacher["role"] if teacher else None,
+        "is_super_admin": bool(teacher["is_super_admin"]) if teacher else False,
     }
 
 
@@ -714,10 +1100,16 @@ def get_available_schools() -> List[Dict[str, Any]]:
 def index():
     school_id = get_active_school_id()
     with get_db() as conn:
-        student_count = conn.execute("SELECT COUNT(*) AS count FROM students WHERE school_id = ?", (school_id,)).fetchone()["count"]
-        subject_count = conn.execute("SELECT COUNT(*) AS count FROM subjects WHERE school_id = ?", (school_id,)).fetchone()["count"]
-        exam_count = conn.execute("SELECT COUNT(*) AS count FROM exams WHERE school_id = ?", (school_id,)).fetchone()["count"]
-        mark_count = conn.execute("SELECT COUNT(*) AS count FROM marks WHERE school_id = ?", (school_id,)).fetchone()["count"]
+        teacher = conn.execute(
+            "SELECT role, is_super_admin FROM teachers WHERE id = ?",
+            (session.get("teacher_id"),),
+        ).fetchone()
+    role = teacher["role"] if teacher else "teacher"
+    with get_db() as conn:
+        student_count = conn.execute("SELECT COUNT(*) AS count FROM students WHERE school_id = ?", (school_id,)).fetchone()["count"] if role in {"admin", "registrar", "super_admin"} else 0
+        subject_count = conn.execute("SELECT COUNT(*) AS count FROM subjects WHERE school_id = ?", (school_id,)).fetchone()["count"] if role in {"admin", "teacher", "exam_officer", "super_admin"} else 0
+        exam_count = conn.execute("SELECT COUNT(*) AS count FROM exams WHERE school_id = ?", (school_id,)).fetchone()["count"] if role in {"admin", "exam_officer", "super_admin"} else 0
+        mark_count = conn.execute("SELECT COUNT(*) AS count FROM marks WHERE school_id = ?", (school_id,)).fetchone()["count"] if role in {"admin", "teacher", "exam_officer", "super_admin"} else 0
         finance = conn.execute(
             """
             SELECT
@@ -736,6 +1128,13 @@ def index():
             """,
             (school_id, school_id, school_id, school_id, school_id, school_id),
         ).fetchone()
+        teacher_workload = conn.execute(
+            """
+            SELECT COUNT(*) AS assignments
+            FROM teacher_learning_areas WHERE school_id = ? AND teacher_id = ?
+            """,
+            (school_id, session.get("teacher_id")),
+        ).fetchone()["assignments"]
     return render_template(
         "index.html",
         student_count=student_count,
@@ -743,6 +1142,8 @@ def index():
         exam_count=exam_count,
         mark_count=mark_count,
         finance=finance,
+        role=role,
+        teacher_workload=teacher_workload,
     )
 
 
@@ -758,6 +1159,7 @@ def login():
             session["teacher_logged_in"] = True
             session["teacher_id"] = teacher["id"]
             session["teacher_name"] = teacher["full_name"]
+            session["teacher_role"] = teacher["role"]
             session["school_id"] = teacher["school_id"]
             flash("Welcome back.")
             return redirect(url_for("index"))
@@ -773,7 +1175,7 @@ def logout():
 
 
 @app.route("/switch-school/<int:school_id>")
-@teacher_required
+@role_required("super_admin")
 def switch_school(school_id: int):
     teacher_id = session.get("teacher_id")
     if not teacher_can_manage_school(teacher_id, school_id):
@@ -790,24 +1192,32 @@ def switch_school(school_id: int):
 
 
 @app.route("/students", methods=["GET", "POST"])
-@teacher_required
+@role_required("admin", "registrar")
 def students():
     school_id = get_active_school_id()
     if request.method == "POST":
+        grade = (request.form.get("grade") or "").strip()
+        stage = (request.form.get("school_stage") or stage_for_grade(grade)).strip()
+        relationship = (request.form.get("parent_relationship") or "").strip()
+        if not valid_student_stage(grade, stage) or relationship not in {"Father", "Mother", "Guardian"}:
+            flash("Choose a grade that belongs to the selected school stage and a parent relationship.")
+            return redirect(url_for("students"))
         with get_db() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO students (admission_number, full_name, gender, grade, class_name, dob, parent_name, parent_contact, school_id, payment_code)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '')
+                INSERT INTO students (admission_number, full_name, gender, grade, school_stage, class_name, dob, parent_name, parent_relationship, parent_contact, school_id, payment_code)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '')
                 """,
                 (
                     request.form.get("admission_number"),
                     request.form.get("full_name"),
                     request.form.get("gender"),
-                    request.form.get("grade"),
+                    grade,
+                    stage,
                     request.form.get("class_name"),
                     request.form.get("dob"),
                     request.form.get("parent_name"),
+                    relationship,
                     request.form.get("parent_contact"),
                     school_id,
                 ),
@@ -827,7 +1237,7 @@ def students():
 
 
 @app.route("/students/<int:student_id>/edit", methods=["GET", "POST"])
-@teacher_required
+@role_required("admin", "registrar")
 def edit_student(student_id: int):
     school_id = get_active_school_id()
     with get_db() as conn:
@@ -837,19 +1247,33 @@ def edit_student(student_id: int):
         return redirect(url_for("students"))
 
     if request.method == "POST":
+        grade = (request.form.get("grade") or "").strip()
+        stage = (request.form.get("school_stage") or stage_for_grade(grade)).strip()
+        relationship = (request.form.get("parent_relationship") or "").strip()
+        if not valid_student_stage(grade, stage) or relationship not in {"Father", "Mother", "Guardian"}:
+            flash("Choose a grade that belongs to the selected school stage and a parent relationship.")
+            return redirect(url_for("edit_student", student_id=student_id))
         with get_db() as conn:
             conn.execute(
-                "UPDATE students SET admission_number = ?, full_name = ?, gender = ?, grade = ?, class_name = ?, dob = ?, parent_name = ?, parent_contact = ? WHERE id = ?",
+                """
+                UPDATE students SET admission_number = ?, full_name = ?, gender = ?, grade = ?,
+                    school_stage = ?, class_name = ?, dob = ?, parent_name = ?,
+                    parent_relationship = ?, parent_contact = ?
+                WHERE id = ? AND school_id = ?
+                """,
                 (
                     request.form.get("admission_number"),
                     request.form.get("full_name"),
                     request.form.get("gender"),
-                    request.form.get("grade"),
+                    grade,
+                    stage,
                     request.form.get("class_name"),
                     request.form.get("dob"),
                     request.form.get("parent_name"),
+                    relationship,
                     request.form.get("parent_contact"),
                     student_id,
+                    school_id,
                 ),
             )
         flash("Student updated successfully.")
@@ -859,7 +1283,7 @@ def edit_student(student_id: int):
 
 
 @app.route("/fees", methods=["GET", "POST"])
-@teacher_required
+@role_required("admin", "finance_officer")
 def fees():
     school_id = get_active_school_id()
     if request.method == "POST":
@@ -868,8 +1292,12 @@ def fees():
         term = (request.form.get("term") or "").strip()
         name = (request.form.get("name") or "").strip()
         amount = parse_ksh_amount(request.form.get("amount"))
-        if not all((grade, academic_year, term, name)) or amount is None:
-            flash("Enter a grade, year, term, fee name, and a positive whole-KSh amount.")
+        if (
+            not all((grade, academic_year, name))
+            or term not in {"Term 1", "Term 2", "Term 3"}
+            or amount is None
+        ):
+            flash("Enter a grade, year, valid term, fee name, and a positive whole-KSh amount.")
             return redirect(url_for("fees"))
 
         with get_db() as conn:
@@ -936,7 +1364,7 @@ def fees():
 
 
 @app.route("/fees/<int:fee_item_id>/apply", methods=["POST"])
-@teacher_required
+@role_required("admin", "finance_officer")
 def apply_fee_item(fee_item_id: int):
     school_id = get_active_school_id()
     with get_db() as conn:
@@ -979,20 +1407,48 @@ def apply_fee_item(fee_item_id: int):
 
 
 @app.route("/payments", methods=["GET", "POST"])
-@teacher_required
+@role_required("admin", "finance_officer")
 def payments():
     school_id = get_active_school_id()
     if request.method == "POST":
         amount = parse_ksh_amount(request.form.get("amount"))
         channel = (request.form.get("channel") or "").strip()
-        reference = (request.form.get("reference") or "").strip()
+        student_id = request.form.get("student_id", type=int)
+        academic_year = (request.form.get("academic_year") or "").strip()
+        term = (request.form.get("term") or "").strip()
         transaction_code = (request.form.get("transaction_code") or "").strip()
         payer_phone = (request.form.get("payer_phone") or "").strip()
-        if amount is None or channel not in {"M-Pesa", "Bank", "Cash", "Other"} or not reference:
-            flash("Enter a positive whole-KSh amount, payment channel, and learner payment code or admission number.")
+        if (
+            amount is None
+            or channel not in {"M-Pesa", "Bank", "Cash", "Other"}
+            or not student_id
+            or not academic_year
+            or not term
+            or not re.fullmatch(r"0\d{9}", payer_phone)
+        ):
+            flash("Choose a learner, fee year and term, and enter a valid 10-digit Kenyan phone number and positive amount.")
             return redirect(url_for("payments"))
 
         with get_db() as conn:
+            candidate = conn.execute(
+                """
+                SELECT * FROM students WHERE id = ? AND school_id = ?
+                """,
+                (student_id, school_id),
+            ).fetchone()
+            if not candidate:
+                flash("The selected learner could not be found.")
+                return redirect(url_for("payments"))
+            applicable_charges = conn.execute(
+                """
+                SELECT COUNT(*) FROM fee_charges
+                WHERE school_id = ? AND student_id = ? AND academic_year = ? AND term = ?
+                """,
+                (school_id, student_id, academic_year, term),
+            ).fetchone()[0]
+            if not applicable_charges:
+                flash("The selected learner has no fee charges for that year and term.")
+                return redirect(url_for("payments"))
             if transaction_code and conn.execute(
                 "SELECT id FROM payments WHERE school_id = ? AND transaction_code = ?",
                 (school_id, transaction_code),
@@ -1000,41 +1456,20 @@ def payments():
                 flash("That transaction code has already been recorded.")
                 return redirect(url_for("payments"))
 
-            candidate = conn.execute(
-                """
-                SELECT * FROM students
-                WHERE school_id = ? AND payment_code = ?
-                """,
-                (school_id, reference),
-            ).fetchone()
-            if not candidate:
-                candidates = conn.execute(
-                    """
-                    SELECT * FROM students
-                    WHERE school_id = ? AND admission_number = ?
-                    ORDER BY id LIMIT 2
-                    """,
-                    (school_id, reference),
-                ).fetchall()
-                if len(candidates) == 1:
-                    candidate = candidates[0]
-
             phone_matches = bool(
-                candidate
-                and payer_phone
-                and candidate["parent_contact"]
+                candidate["parent_contact"]
                 and normalize_phone(payer_phone) == normalize_phone(candidate["parent_contact"])
             )
-            auto_match = bool(candidate and (not payer_phone or phone_matches))
+            auto_match = phone_matches
             status = "matched" if auto_match else "pending"
             timestamp = datetime.now().isoformat(sep=" ", timespec="seconds")
             cursor = conn.execute(
                 """
                 INSERT INTO payments
                     (school_id, amount, channel, transaction_code, payer_phone, reference,
-                     student_id, suggested_student_id, status, received_at, verified_by,
+                     academic_year, term, student_id, suggested_student_id, status, received_at, verified_by,
                      verified_at, verification_note)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     school_id,
@@ -1042,7 +1477,9 @@ def payments():
                     channel,
                     transaction_code or None,
                     payer_phone or None,
-                    reference,
+                    candidate["payment_code"] or candidate["admission_number"],
+                    academic_year,
+                    term,
                     candidate["id"] if auto_match else None,
                     candidate["id"] if candidate else None,
                     status,
@@ -1075,7 +1512,7 @@ def payments():
                     "Payment requires verification",
                     "payment",
                     payment_id,
-                    f"KSh {amount}; reference {reference}",
+                    f"KSh {amount}; learner {candidate['full_name']}; {academic_year} {term}",
                 )
         if receipt_id:
             flash("Payment matched and receipt generated.")
@@ -1102,16 +1539,25 @@ def payments():
             "SELECT id, full_name, admission_number FROM students WHERE school_id = ? ORDER BY full_name",
             (school_id,),
         ).fetchall()
+        fee_periods = conn.execute(
+            """
+            SELECT DISTINCT academic_year, term
+            FROM fee_charges WHERE school_id = ?
+            ORDER BY academic_year DESC, term
+            """,
+            (school_id,),
+        ).fetchall()
     return render_template(
         "payments.html",
         payments=payment_rows,
         students=student_rows,
+        fee_periods=fee_periods,
         unmatched_only=request.args.get("queue") == "unmatched",
     )
 
 
 @app.route("/payments/<int:payment_id>/verify", methods=["POST"])
-@teacher_required
+@role_required("admin", "finance_officer")
 def verify_payment(payment_id: int):
     school_id = get_active_school_id()
     student_id = request.form.get("student_id", type=int)
@@ -1159,14 +1605,15 @@ def verify_payment(payment_id: int):
 
 
 @app.route("/receipts/<int:receipt_id>")
-@teacher_required
+@role_required("admin", "finance_officer")
 def payment_receipt(receipt_id: int):
     school_id = get_active_school_id()
     with get_db() as conn:
         receipt = conn.execute(
             """
             SELECT r.*, p.amount, p.channel, p.transaction_code, p.payer_phone,
-                   p.received_at, p.reference, r.previous_balance, r.new_balance,
+                   p.received_at, p.reference, p.academic_year, p.term,
+                   r.previous_balance, r.new_balance,
                    s.full_name, s.admission_number,
                    s.id AS student_id, s.grade, s.payment_code, school.name AS school_name
             FROM receipts r
@@ -1184,7 +1631,7 @@ def payment_receipt(receipt_id: int):
 
 
 @app.route("/students/<int:student_id>/statement")
-@teacher_required
+@role_required("admin", "finance_officer")
 def fee_statement(student_id: int):
     school_id = get_active_school_id()
     with get_db() as conn:
@@ -1194,7 +1641,7 @@ def fee_statement(student_id: int):
         ).fetchone()
         if not student:
             flash("Student not found.")
-            return redirect(url_for("students"))
+            return redirect(url_for("index"))
         charges = conn.execute(
             """
             SELECT id, item_name AS description, amount, created_at, academic_year, term
@@ -1205,7 +1652,8 @@ def fee_statement(student_id: int):
         credits = conn.execute(
             """
             SELECT p.id, p.amount, p.received_at AS created_at, p.channel,
-                   p.transaction_code, r.id AS receipt_id, r.receipt_number
+                   p.transaction_code, p.academic_year, p.term,
+                   r.id AS receipt_id, r.receipt_number
             FROM payments p LEFT JOIN receipts r ON r.payment_id = p.id
             WHERE p.student_id = ? AND p.school_id = ? AND p.status = 'matched'
             """,
@@ -1230,6 +1678,11 @@ def fee_statement(student_id: int):
                 "id": credit["id"],
                 "created_at": credit["created_at"],
                 "description": f"{credit['channel']} payment"
+                + (
+                    f" ({credit['academic_year']} {credit['term']})"
+                    if credit["academic_year"] and credit["term"]
+                    else ""
+                )
                 + (f" · {credit['transaction_code']}" if credit["transaction_code"] else ""),
                 "debit": 0,
                 "credit": int(credit["amount"]),
@@ -1254,59 +1707,149 @@ def fee_statement(student_id: int):
 
 
 @app.route("/teachers", methods=["GET", "POST"])
-@teacher_required
+@role_required("admin")
 def teachers():
     school_id = get_active_school_id()
     if request.method == "POST":
+        full_name = (request.form.get("full_name") or "").strip()
+        username = (request.form.get("username") or "").strip()
+        password = request.form.get("password") or ""
+        role = (request.form.get("role") or "").strip()
+        if not full_name or not username or not password or role not in {
+            "finance_officer",
+            "registrar",
+            "exam_officer",
+            "teacher",
+        }:
+            flash("Enter the teacher's name, username, password, and a valid school role.")
+            return redirect(url_for("teachers"))
         with get_db() as conn:
             conn.execute(
-                "INSERT INTO teachers (username, password, full_name, school_id) VALUES (?, ?, ?, ?)",
-                (
-                    request.form.get("username"),
-                    request.form.get("password"),
-                    request.form.get("full_name"),
-                    school_id,
-                ),
+                "INSERT INTO teachers (username, password, full_name, school_id, role) VALUES (?, ?, ?, ?, ?)",
+                (username, password, full_name, school_id, role),
             )
         flash("Teacher account added successfully.")
         return redirect(url_for("teachers"))
 
     with get_db() as conn:
-        teacher_rows = conn.execute("SELECT * FROM teachers WHERE school_id = ? ORDER BY full_name", (school_id,)).fetchall()
+        teacher_rows = conn.execute(
+            """
+            SELECT t.*, COUNT(a.id) AS workload
+            FROM teachers t
+            LEFT JOIN teacher_learning_areas a ON a.teacher_id = t.id AND a.school_id = t.school_id
+            WHERE t.school_id = ?
+            GROUP BY t.id
+            ORDER BY t.full_name
+            """,
+            (school_id,),
+        ).fetchall()
     return render_template("teachers.html", teachers=teacher_rows)
 
 
 @app.route("/subjects", methods=["GET", "POST"])
-@teacher_required
+@role_required("admin")
 def subjects():
     school_id = get_active_school_id()
     if request.method == "POST":
+        name = (request.form.get("name") or "").strip()
+        short_name = (request.form.get("short_name") or "").strip()
+        grade_level = (request.form.get("grade_level") or "").strip()
+        if not name or not grade_level:
+            flash("Enter a learning area name and grade.")
+            return redirect(url_for("subjects"))
         with get_db() as conn:
             conn.execute(
                 "INSERT INTO subjects (name, short_name, grade_level, school_id) VALUES (?, ?, ?, ?)",
-                (request.form.get("name"), request.form.get("short_name"), request.form.get("grade_level"), school_id),
+                (name, short_name, grade_level, school_id),
             )
-        flash("Subject added successfully.")
+        flash("Learning area added successfully.")
         return redirect(url_for("subjects"))
 
     with get_db() as conn:
         subject_rows = conn.execute("SELECT * FROM subjects WHERE school_id = ? ORDER BY name", (school_id,)).fetchall()
-    return render_template("subjects.html", subjects=subject_rows)
+        teacher_rows = conn.execute(
+            "SELECT id, full_name FROM teachers WHERE school_id = ? ORDER BY full_name",
+            (school_id,),
+        ).fetchall()
+        assignment_rows = conn.execute(
+            """
+            SELECT a.id, a.grade, t.full_name, s.name
+            FROM teacher_learning_areas a
+            JOIN teachers t ON t.id = a.teacher_id
+            JOIN subjects s ON s.id = a.subject_id
+            WHERE a.school_id = ?
+            ORDER BY t.full_name, a.grade, s.name
+            """,
+            (school_id,),
+        ).fetchall()
+    return render_template(
+        "subjects.html",
+        subjects=subject_rows,
+        teachers=teacher_rows,
+        assignments=assignment_rows,
+    )
+
+
+@app.route("/teacher-assignments", methods=["POST"])
+@role_required("admin")
+def teacher_assignments():
+    school_id = get_active_school_id()
+    teacher_id = request.form.get("teacher_id", type=int)
+    subject_id = request.form.get("subject_id", type=int)
+    grade = (request.form.get("grade") or "").strip()
+    if not teacher_id or not subject_id or not grade:
+        flash("Choose a teacher, learning area, and grade.")
+        return redirect(url_for("subjects"))
+    with get_db() as conn:
+        teacher = conn.execute(
+            "SELECT id FROM teachers WHERE id = ? AND school_id = ?",
+            (teacher_id, school_id),
+        ).fetchone()
+        subject = conn.execute(
+            "SELECT id FROM subjects WHERE id = ? AND school_id = ?",
+            (subject_id, school_id),
+        ).fetchone()
+        if not teacher or not subject:
+            flash("The selected teacher or learning area does not belong to this school.")
+            return redirect(url_for("subjects"))
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO teacher_learning_areas
+                (school_id, teacher_id, subject_id, grade)
+            VALUES (?, ?, ?, ?)
+            """,
+            (school_id, teacher_id, subject_id, grade),
+        )
+    flash("Teacher learning-area assignment saved.")
+    return redirect(url_for("subjects"))
 
 
 @app.route("/exams", methods=["GET", "POST"])
-@teacher_required
+@role_required("admin", "exam_officer")
 def exams():
     school_id = get_active_school_id()
     if request.method == "POST":
+        grade_level = (request.form.get("grade_level") or "").strip()
+        exam_name = (request.form.get("name") or "").strip()
+        exam_type = (request.form.get("exam_type") or "").strip()
+        term = (request.form.get("term") or "").strip()
+        if not exam_name or not exam_type or not term or grade_level not in {
+            "All",
+            "Playgroup",
+            "PP1",
+            "PP2",
+            *(f"Grade {grade}" for grade in range(1, 13)),
+        }:
+            flash("Enter an exam name, type, term, and valid grade.")
+            return redirect(url_for("exams"))
         with get_db() as conn:
             conn.execute(
                 "INSERT INTO exams (name, exam_type, term, grade_level, school_id) VALUES (?, ?, ?, ?, ?)",
                 (
-                    request.form.get("name"),
-                    request.form.get("exam_type"),
-                    request.form.get("term"),
-                    request.form.get("grade_level"),
+                    exam_name,
+                    exam_type,
+                    term,
+                    grade_level,
                     school_id,
                 ),
             )
@@ -1318,93 +1861,513 @@ def exams():
     return render_template("exams.html", exams=exam_rows)
 
 
+def make_exam_marks_workbook(exam_id: int, school_id: int) -> BytesIO:
+    with get_db() as conn:
+        exam = conn.execute(
+            "SELECT * FROM exams WHERE id = ? AND school_id = ?",
+            (exam_id, school_id),
+        ).fetchone()
+        if not exam:
+            raise ValueError("Exam not found.")
+        students = conn.execute(
+            """
+            SELECT * FROM students
+            WHERE school_id = ? AND (? = 'All' OR grade = ?)
+            ORDER BY grade, class_name, full_name
+            """,
+            (school_id, exam["grade_level"], exam["grade_level"]),
+        ).fetchall()
+        learning_areas = conn.execute(
+            """
+            SELECT * FROM subjects
+            WHERE school_id = ? AND (grade_level = 'All' OR grade_level = ?)
+            ORDER BY name
+            """,
+            (school_id, exam["grade_level"]),
+        ).fetchall()
+    school = get_current_school()
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Marks"
+    sheet["A1"] = school["name"]
+    sheet["B1"] = f"{school['name']} — Assessment Marks"
+    sheet["B2"] = f"{exam['name']} · {exam['exam_type']}"
+    sheet["B3"] = f"{exam['term']} · {exam['grade_level']}"
+    for cell in ("B1", "B2", "B3"):
+        sheet[cell].font = Font(bold=True, size=14 if cell == "B1" else 11)
+    headers = ["Learner Name", "Admission Number", "Learning Area", "Score (0-100)", "CBE Grade", "Points"]
+    for column, header in enumerate(headers, start=1):
+        cell = sheet.cell(row=6, column=column, value=header)
+        cell.font = Font(bold=True)
+    current_row = 7
+    for student in students:
+        for learning_area in learning_areas:
+            if learning_area["grade_level"] not in {"All", student["grade"]}:
+                continue
+            sheet.cell(current_row, 1, student["full_name"])
+            sheet.cell(current_row, 2, student["admission_number"])
+            sheet.cell(current_row, 3, learning_area["name"])
+            sheet.cell(current_row, 4)
+            score_ref = f"D{current_row}"
+            sheet.cell(
+                current_row,
+                5,
+                f'=IF({score_ref}>=90,"EE1",IF({score_ref}>=75,"EE2",IF({score_ref}>=58,"ME1",IF({score_ref}>=41,"ME2",IF({score_ref}>=31,"AE1",IF({score_ref}>=21,"AE2",IF({score_ref}>=11,"BE1","BE2")))))))',
+            )
+            sheet.cell(
+                current_row,
+                6,
+                f'=IF({score_ref}>=90,8,IF({score_ref}>=75,7,IF({score_ref}>=58,6,IF({score_ref}>=41,5,IF({score_ref}>=31,4,IF({score_ref}>=21,3,IF({score_ref}>=11,2,1)))))))',
+            )
+            current_row += 1
+    for column, width in {"A": 28, "B": 20, "C": 30, "D": 16, "E": 18, "F": 12}.items():
+        sheet.column_dimensions[column].width = width
+    sheet.freeze_panes = "A7"
+    sheet.auto_filter.ref = f"A6:F{max(6, current_row - 1)}"
+    workbook_stream = BytesIO()
+    workbook.save(workbook_stream)
+    return embed_school_logo(workbook_stream, school.get("logo_url"))
+
+
+@app.route("/exams/<int:exam_id>/marks-template")
+@role_required("admin", "exam_officer")
+def download_marks_template(exam_id: int):
+    school_id = get_active_school_id()
+    try:
+        workbook = make_exam_marks_workbook(exam_id, school_id)
+    except ValueError:
+        flash("Exam not found.")
+        return redirect(url_for("exams"))
+    return send_file(
+        workbook,
+        as_attachment=True,
+        download_name=f"marks-template-{exam_id}.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
 @app.route("/marks", methods=["GET", "POST"])
-@teacher_required
+@role_required("admin", "exam_officer", "teacher")
 def marks():
     school_id = get_active_school_id()
+    teacher_id = session.get("teacher_id")
+    role = session.get("teacher_role")
+    assigned_subjects = None
     with get_db() as conn:
-        students = conn.execute("SELECT * FROM students WHERE school_id = ? ORDER BY grade, class_name, full_name", (school_id,)).fetchall()
-        subjects = conn.execute("SELECT * FROM subjects WHERE school_id = ? ORDER BY name", (school_id,)).fetchall()
-        exams = conn.execute("SELECT * FROM exams WHERE school_id = ? ORDER BY created_at DESC", (school_id,)).fetchall()
+        if role == "teacher":
+            assignments = conn.execute(
+                """
+                SELECT grade, subject_id FROM teacher_learning_areas
+                WHERE school_id = ? AND teacher_id = ?
+                """,
+                (school_id, teacher_id),
+            ).fetchall()
+            assigned_subjects = {
+                (assignment["grade"], assignment["subject_id"])
+                for assignment in assignments
+            }
+            students = conn.execute(
+                """
+                SELECT DISTINCT st.* FROM students st
+                JOIN teacher_learning_areas a
+                  ON a.school_id = st.school_id AND a.grade = st.grade
+                WHERE st.school_id = ? AND a.teacher_id = ?
+                ORDER BY st.grade, st.class_name, st.full_name
+                """,
+                (school_id, teacher_id),
+            ).fetchall()
+            subjects = conn.execute(
+                """
+                SELECT DISTINCT s.* FROM subjects s
+                JOIN teacher_learning_areas a ON a.subject_id = s.id
+                WHERE a.school_id = ? AND a.teacher_id = ?
+                ORDER BY s.name
+                """,
+                (school_id, teacher_id),
+            ).fetchall()
+            exams = conn.execute(
+                """
+                SELECT DISTINCT e.* FROM exams e
+                WHERE e.school_id = ? AND (e.grade_level = 'All' OR EXISTS (
+                    SELECT 1 FROM teacher_learning_areas a
+                    WHERE a.school_id = e.school_id AND a.teacher_id = ?
+                      AND a.grade = e.grade_level
+                ))
+                ORDER BY e.created_at DESC
+                """,
+                (school_id, teacher_id),
+            ).fetchall()
+        else:
+            students = conn.execute("SELECT * FROM students WHERE school_id = ? ORDER BY grade, class_name, full_name", (school_id,)).fetchall()
+            subjects = conn.execute("SELECT * FROM subjects WHERE school_id = ? ORDER BY name", (school_id,)).fetchall()
+            exams = conn.execute("SELECT * FROM exams WHERE school_id = ? ORDER BY created_at DESC", (school_id,)).fetchall()
+            assigned_subjects = {
+                (student["grade"], subject["id"])
+                for student in students
+                for subject in subjects
+            }
 
     if request.method == "POST":
         if "marks_file" in request.files and request.files["marks_file"].filename:
             file = request.files["marks_file"]
-            path = os.path.join(app.config["UPLOAD_FOLDER"], secure_filename(file.filename))
-            file.save(path)
-            wb = load_workbook(path, data_only=True)
+            if not file.filename.lower().endswith(".xlsx"):
+                flash("Marks import accepts an .xlsx workbook. Download the exam template or export a Google Sheet as .xlsx.")
+                return redirect(url_for("marks"))
+            exam_id = request.form.get("exam_id", type=int)
+            exam = next((item for item in exams if item["id"] == exam_id), None)
+            if not exam:
+                flash("Select a valid exam for this school.")
+                return redirect(url_for("marks"))
+            wb = load_workbook(file.stream, data_only=True, read_only=True)
             sheet = wb.active
             rows = list(sheet.iter_rows(values_only=True))
-            if rows:
-                header = [str(cell).strip() if cell is not None else "" for cell in rows[0]]
-                for row in rows[1:]:
-                    if not any(cell not in (None, "") for cell in row):
+            header_index = next(
+                (
+                    index
+                    for index, row in enumerate(rows)
+                    if row and any(str(cell or "").strip().lower() in {"score", "score (0-100)", "marks", "marks obtained"} for cell in row)
+                ),
+                None,
+            )
+            if header_index is None:
+                flash("The workbook needs a header row with learner, learning area, and score columns.")
+                return redirect(url_for("marks"))
+            header = [str(cell or "").strip().lower() for cell in rows[header_index]]
+            score_index = next((i for i, name in enumerate(header) if name in {"score", "marks", "marks obtained", "score (0-100)"}), None)
+            area_index = next((i for i, name in enumerate(header) if name in {"learning area", "subject"}), None)
+            admission_index = next((i for i, name in enumerate(header) if name in {"admission", "admission number", "admission_number"}), None)
+            name_index = next((i for i, name in enumerate(header) if name in {"learner name", "student name", "name"}), None)
+            if score_index is None or area_index is None or (admission_index is None and name_index is None):
+                flash("The workbook needs learner name or admission, learning area, and score columns.")
+                return redirect(url_for("marks"))
+
+            by_admission = {str(student["admission_number"]).strip().casefold(): student for student in students}
+            by_name: Dict[str, List[Any]] = {}
+            for student in students:
+                by_name.setdefault(str(student["full_name"]).strip().casefold(), []).append(student)
+            subject_by_name = {str(subject["name"]).strip().casefold(): subject for subject in subjects}
+            imported = 0
+            skipped = 0
+            invalid_rows = []
+            with get_db() as conn:
+                for row_number, row in enumerate(rows[header_index + 1 :], start=header_index + 2):
+                    if not row or not any(value not in (None, "") for value in row):
                         continue
-                    record = dict(zip(header, row))
-                    admission = record.get("admission") or record.get("admission_number") or record.get("Admission Number")
-                    subject_name = record.get("subject") or record.get("subject_name") or record.get("Subject")
-                    marks_value = record.get("marks") or record.get("score") or record.get("Marks")
-                    if not admission or not subject_name or marks_value in (None, ""):
+                    try:
+                        raw_score = row[score_index] if score_index < len(row) else None
+                        score = float(raw_score)
+                        if score < 0 or score > 100:
+                            raise ValueError
+                    except (TypeError, ValueError):
+                        skipped += 1
+                        invalid_rows.append(str(row_number))
                         continue
-                    student = next((item for item in students if str(item["admission_number"]).lower() == str(admission).strip().lower()), None)
-                    subject = next((item for item in subjects if str(item["name"]).lower() == str(subject_name).strip().lower()), None)
-                    if student and subject:
-                        with get_db() as conn:
-                            conn.execute(
-                                "INSERT INTO marks (student_id, exam_id, subject_id, marks_obtained, out_of, school_id) VALUES (?, ?, ?, ?, ?, ?)",
-                                (student["id"], request.form.get("exam_id"), subject["id"], float(marks_value), 100, school_id),
-                            )
-            flash("Marks imported from Excel successfully.")
+                    admission = (
+                        str(row[admission_index]).strip().casefold()
+                        if admission_index is not None and admission_index < len(row) and row[admission_index]
+                        else ""
+                    )
+                    learner_name = (
+                        str(row[name_index]).strip().casefold()
+                        if name_index is not None and name_index < len(row) and row[name_index]
+                        else ""
+                    )
+                    area_name = (
+                        str(row[area_index]).strip().casefold()
+                        if area_index < len(row) and row[area_index]
+                        else ""
+                    )
+                    student = by_admission.get(admission) if admission else None
+                    if not student and learner_name:
+                        name_matches = by_name.get(learner_name, [])
+                        student = name_matches[0] if len(name_matches) == 1 else None
+                    subject = subject_by_name.get(area_name)
+                    if (
+                        not student
+                        or not subject
+                        or (learner_name and learner_name != student["full_name"].strip().casefold())
+                        or (exam["grade_level"] != "All" and student["grade"] != exam["grade_level"])
+                        or subject["grade_level"] not in {"All", student["grade"]}
+                    ):
+                        skipped += 1
+                        invalid_rows.append(str(row_number))
+                        continue
+                    if role == "teacher":
+                        if (student["grade"], subject["id"]) not in assigned_subjects:
+                            skipped += 1
+                            invalid_rows.append(str(row_number))
+                            continue
+                    updated = conn.execute(
+                        """
+                        UPDATE marks SET marks_obtained = ?, out_of = 100
+                        WHERE student_id = ? AND exam_id = ? AND subject_id = ? AND school_id = ?
+                        """,
+                        (score, student["id"], exam_id, subject["id"], school_id),
+                    )
+                    if not updated.rowcount:
+                        conn.execute(
+                            """
+                            INSERT INTO marks (student_id, exam_id, subject_id, marks_obtained, out_of, school_id)
+                            VALUES (?, ?, ?, ?, 100, ?)
+                            """,
+                            (student["id"], exam_id, subject["id"], score, school_id),
+                        )
+                    imported += 1
+            if skipped:
+                flash(f"Imported {imported} mark(s); skipped {skipped} invalid or unassigned row(s): {', '.join(invalid_rows[:10])}.")
+            else:
+                flash(f"Imported {imported} mark(s) from the workbook.")
+            wb.close()
             return redirect(url_for("marks"))
 
-        exam_id = request.form.get("exam_id")
+        exam_id = request.form.get("exam_id", type=int)
+        if not exam_id or not any(item["id"] == exam_id for item in exams):
+            flash("Select a valid exam before saving marks.")
+            return redirect(url_for("marks"))
+        exam = next(item for item in exams if item["id"] == exam_id)
         with get_db() as conn:
             for student in students:
                 for subject in subjects:
                     raw_value = request.form.get(f"mark_{student['id']}_{subject['id']}")
                     if raw_value is None or raw_value == "":
                         continue
+                    if (student["grade"], subject["id"]) not in assigned_subjects:
+                        continue
+                    try:
+                        score = float(raw_value)
+                    except ValueError:
+                        conn.rollback()
+                        flash(f"Invalid score for {student['full_name']} in {subject['name']}.")
+                        return redirect(url_for("marks"))
+                    if score < 0 or score > 100:
+                        conn.rollback()
+                        flash(f"Score for {student['full_name']} in {subject['name']} must be 0 to 100.")
+                        return redirect(url_for("marks"))
+                    if (exam["grade_level"] != "All" and student["grade"] != exam["grade_level"]) or subject["grade_level"] not in {"All", student["grade"]}:
+                        continue
+                    updated = conn.execute(
+                        """
+                        UPDATE marks SET marks_obtained = ?, out_of = 100
+                        WHERE student_id = ? AND exam_id = ? AND subject_id = ? AND school_id = ?
+                        """,
+                        (score, student["id"], exam_id, subject["id"], school_id),
+                    )
+                    if updated.rowcount:
+                        continue
                     conn.execute(
-                        "INSERT INTO marks (student_id, exam_id, subject_id, marks_obtained, out_of, school_id) VALUES (?, ?, ?, ?, ?, ?)",
-                        (student["id"], exam_id, subject["id"], float(raw_value), 100, school_id),
+                        """
+                        INSERT INTO marks (student_id, exam_id, subject_id, marks_obtained, out_of, school_id)
+                        VALUES (?, ?, ?, ?, 100, ?)
+                        """,
+                        (student["id"], exam_id, subject["id"], score, school_id),
                     )
         flash("Marks were saved.")
         return redirect(url_for("marks"))
 
-    return render_template("marks.html", students=students, subjects=subjects, exams=exams)
+    return render_template(
+        "marks.html",
+        students=students,
+        subjects=subjects,
+        exams=exams,
+        assigned_subjects=assigned_subjects,
+    )
 
 
 @app.route("/reports")
-@teacher_required
+@role_required("admin", "exam_officer", "teacher")
 def reports():
     school_id = get_active_school_id()
+    exam_id = request.args.get("exam_id", type=int)
     with get_db() as conn:
-        student_rows = conn.execute("SELECT * FROM students WHERE school_id = ? ORDER BY grade, class_name, full_name", (school_id,)).fetchall()
-    student_reports = [build_student_report(student["id"]) for student in student_rows]
-    return render_template("reports.html", student_reports=student_reports)
+        exams = conn.execute(
+            "SELECT id, name, exam_type, term, grade_level FROM exams WHERE school_id = ? ORDER BY created_at DESC",
+            (school_id,),
+        ).fetchall()
+        if exam_id and not any(exam["id"] == exam_id for exam in exams):
+            flash("The selected exam could not be found.")
+            return redirect(url_for("reports"))
+        if session.get("teacher_role") == "teacher":
+            student_rows = conn.execute(
+                """
+                SELECT DISTINCT st.* FROM students st
+                JOIN teacher_learning_areas a
+                  ON a.school_id = st.school_id AND a.grade = st.grade
+                WHERE st.school_id = ? AND a.teacher_id = ?
+                ORDER BY st.grade, st.class_name, st.full_name
+                """,
+                (school_id, session.get("teacher_id")),
+            ).fetchall()
+        else:
+            student_rows = conn.execute(
+                "SELECT * FROM students WHERE school_id = ? ORDER BY grade, class_name, full_name",
+                (school_id,),
+            ).fetchall()
+    student_reports = [
+        build_student_report(student["id"], exam_id) for student in student_rows
+    ]
+    return render_template(
+        "reports.html",
+        student_reports=student_reports,
+        exams=exams,
+        selected_exam_id=exam_id,
+    )
+
+
+def ensure_teacher_student_access(student_id: int) -> None:
+    with get_db() as conn:
+        student = conn.execute(
+            "SELECT grade FROM students WHERE id = ? AND school_id = ?",
+            (student_id, get_active_school_id()),
+        ).fetchone()
+        if not student:
+            abort(404)
+        if session.get("teacher_role") != "teacher":
+            return
+        assigned = conn.execute(
+            """
+            SELECT 1 FROM students st
+            JOIN teacher_learning_areas a
+              ON a.school_id = st.school_id AND a.grade = st.grade
+            WHERE st.id = ? AND st.school_id = ? AND a.teacher_id = ?
+            LIMIT 1
+            """,
+            (student_id, get_active_school_id(), session.get("teacher_id")),
+        ).fetchone()
+    if not assigned:
+        abort(404)
+
+
+def validate_report_exam(exam_id: int | None) -> None:
+    if exam_id is None:
+        return
+    with get_db() as conn:
+        exam = conn.execute(
+            "SELECT 1 FROM exams WHERE id = ? AND school_id = ?",
+            (exam_id, get_active_school_id()),
+        ).fetchone()
+    if not exam:
+        abort(404)
 
 
 @app.route("/report/<int:student_id>")
-@teacher_required
+@role_required("admin", "exam_officer", "teacher")
 def report_card(student_id: int):
-    report = build_student_report(student_id)
-    return render_template(report["report_template"], report=report)
+    ensure_teacher_student_access(student_id)
+    exam_id = request.args.get("exam_id", type=int)
+    report_view = request.args.get("view", "marks")
+    if report_view not in {"marks", "points"}:
+        abort(400)
+    validate_report_exam(exam_id)
+    report = build_student_report(student_id, exam_id)
+    return render_template(
+        "report_card_cbe.html",
+        report=report,
+        report_view=report_view,
+        selected_exam_id=exam_id,
+    )
 
 
 @app.route("/print-report/<int:student_id>")
-@teacher_required
+@role_required("admin", "exam_officer", "teacher")
 def print_report(student_id: int):
-    report = build_student_report(student_id)
-    return render_template(report["report_template"], report=report, print_mode=True)
+    ensure_teacher_student_access(student_id)
+    exam_id = request.args.get("exam_id", type=int)
+    report_view = request.args.get("view", "marks")
+    if report_view not in {"marks", "points"}:
+        abort(400)
+    validate_report_exam(exam_id)
+    report = build_student_report(student_id, exam_id)
+    return render_template(
+        "report_card_cbe.html",
+        report=report,
+        print_mode=True,
+        report_view=report_view,
+        selected_exam_id=exam_id,
+    )
+
+
+@app.route("/report/<int:student_id>/download")
+@role_required("admin", "exam_officer", "teacher")
+def download_report(student_id: int):
+    ensure_teacher_student_access(student_id)
+    exam_id = request.args.get("exam_id", type=int)
+    report_view = request.args.get("view", "marks")
+    if report_view not in {"marks", "points"}:
+        abort(400)
+    validate_report_exam(exam_id)
+    report = build_student_report(student_id, exam_id)
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Learner Result"
+    sheet["A1"] = get_current_school()["name"]
+    sheet["A2"] = f"{report['student']['full_name']} · {report['student']['grade']}"
+    sheet["A3"] = report["exam_name"]
+    if report_view == "points":
+        sheet.append([])
+        sheet.append(["Learning Area", "CBE Grade", "Points"])
+        for item in report["subject_summary"]:
+            sheet.append([item["name"], item["grade"]["grade"], item["points"]])
+    else:
+        sheet.append([])
+        sheet.append(["Learning Area", "Marks", "Out of", "Percentage", "CBE Grade", "Points", "Exam"])
+        for item in report["mark_entries"]:
+            sheet.append(
+                [
+                    item["name"],
+                    item["score"],
+                    item["out_of"],
+                    item["percentage"],
+                    item["grade"],
+                    item["points"],
+                    item["exam_name"],
+                ]
+            )
+    sheet.column_dimensions["A"].width = 30
+    for column in ("B", "C", "D", "E", "F", "G"):
+        sheet.column_dimensions[column].width = 18
+    workbook_stream = BytesIO()
+    workbook.save(workbook_stream)
+    workbook_stream = embed_school_logo(
+        workbook_stream, get_current_school().get("logo_url")
+    )
+    return send_file(
+        workbook_stream,
+        as_attachment=True,
+        download_name=secure_filename(
+            f"{report['student']['full_name']}-{report_view}-result.xlsx"
+        ),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 @app.route("/class-analysis")
-@teacher_required
+@role_required("admin", "exam_officer", "teacher")
 def class_analysis():
     school_id = get_active_school_id()
     with get_db() as conn:
-        student_rows = conn.execute("SELECT * FROM students WHERE school_id = ? ORDER BY grade, class_name, full_name", (school_id,)).fetchall()
-        subjects = conn.execute("SELECT * FROM subjects WHERE school_id = ? ORDER BY name", (school_id,)).fetchall()
+        if session.get("teacher_role") == "teacher":
+            student_rows = conn.execute(
+                """
+                SELECT DISTINCT st.* FROM students st
+                JOIN teacher_learning_areas a
+                  ON a.school_id = st.school_id AND a.grade = st.grade
+                WHERE st.school_id = ? AND a.teacher_id = ?
+                ORDER BY st.grade, st.class_name, st.full_name
+                """,
+                (school_id, session.get("teacher_id")),
+            ).fetchall()
+            subjects = conn.execute(
+                """
+                SELECT DISTINCT s.* FROM subjects s
+                JOIN teacher_learning_areas a ON a.subject_id = s.id
+                WHERE a.school_id = ? AND a.teacher_id = ?
+                ORDER BY s.name
+                """,
+                (school_id, session.get("teacher_id")),
+            ).fetchall()
+        else:
+            student_rows = conn.execute("SELECT * FROM students WHERE school_id = ? ORDER BY grade, class_name, full_name", (school_id,)).fetchall()
+            subjects = conn.execute("SELECT * FROM subjects WHERE school_id = ? ORDER BY name", (school_id,)).fetchall()
 
     analyses: List[Dict[str, Any]] = []
     grouped: Dict[str, List[Dict[str, Any]]] = {}
@@ -1436,7 +2399,7 @@ def class_analysis():
 
 
 @app.route("/settings", methods=["GET", "POST"])
-@teacher_required
+@role_required("admin")
 def settings():
     school_id = get_active_school_id()
     with get_db() as conn:

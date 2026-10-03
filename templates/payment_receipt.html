@@ -13,6 +13,8 @@
   <p><strong>Previous balance:</strong> KSh {{ "{:,}".format(receipt.previous_balance) }}</p>
   <p><strong>New balance:</strong> KSh {{ "{:,}".format(receipt.new_balance) }}</p>
   <p><strong>Channel:</strong> {{ receipt.channel }}</p>
+  <p><strong>Fee period:</strong> {{ receipt.academic_year }} · {{ receipt.term }}</p>
+  <p><strong>Fee period:</strong> {{ receipt.academic_year }} · {{ receipt.term }}</p>
   <p><strong>Transaction:</strong> {{ receipt.transaction_code or 'Not provided' }}</p>
   <p><strong>Reference:</strong> {{ receipt.reference }}</p>
   <p><a href="{{ url_for('fee_statement', student_id=receipt.student_id) }}">View learner statement</a></p>

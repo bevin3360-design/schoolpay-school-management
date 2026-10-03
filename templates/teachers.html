@@ -2,7 +2,7 @@
 {% block content %}
 <div class="card">
   <h2>Teacher Management</h2>
-  <p>Create teacher accounts that can access the school records system.</p>
+  <p>School administrators create staff accounts and choose each staff member's role. Developer super-administration remains a separate platform account.</p>
   <form method="post" class="form-grid">
     <label>
       Full Name
@@ -16,6 +16,14 @@
       Password
       <input name="password" type="password" required>
     </label>
+    <label>Role
+      <select name="role" required>
+        <option value="teacher">Teacher</option>
+        <option value="finance_officer">Finance officer</option>
+        <option value="registrar">Registrar</option>
+        <option value="exam_officer">Exam officer</option>
+      </select>
+    </label>
     <label>
       <span>&nbsp;</span>
       <button type="submit">Add Teacher</button>
@@ -26,13 +34,15 @@
   <h3>Existing Teachers</h3>
   <table>
     <thead>
-      <tr><th>Full Name</th><th>Username</th></tr>
+      <tr><th>Full Name</th><th>Username</th><th>Role</th><th>Learning-area assignments</th></tr>
     </thead>
     <tbody>
       {% for teacher in teachers %}
       <tr>
         <td>{{ teacher.full_name }}</td>
         <td>{{ teacher.username }}</td>
+        <td>{{ teacher.role|replace('_', ' ')|title }}</td>
+        <td>{{ teacher.workload }}</td>
       </tr>
       {% endfor %}
     </tbody>

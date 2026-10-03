@@ -1,3 +1,4 @@
+import app as app_module
 from app import app, build_student_report, get_grade_info, get_report_template_name, get_subject_grade_rubric, normalize_grade_level, teacher_can_manage_school
 
 
@@ -37,7 +38,9 @@ def test_report_template_selection_is_grade_specific():
     assert get_report_template_name("Grade 5") == "report_card_default.html"
 
 
-def test_school_switch_updates_session():
+def test_school_switch_updates_session(tmp_path, monkeypatch):
+    monkeypatch.setattr(app_module, "DB_PATH", str(tmp_path / "switch.db"))
+    app_module.init_db()
     client = app.test_client()
     with client.session_transaction() as session:
         session["teacher_logged_in"] = True
@@ -51,13 +54,27 @@ def test_school_switch_updates_session():
 
 
 def test_grade_7_to_9_rubric_uses_requested_band_names():
-    assert get_subject_grade_rubric("Grade 7", 62)["grade"] == "EE1"
-    assert get_subject_grade_rubric("Grade 7", 57)["grade"] == "EE2"
-    assert get_subject_grade_rubric("Grade 7", 50)["grade"] == "ME1"
-    assert get_subject_grade_rubric("Grade 7", 44)["grade"] == "ME2"
-    assert get_subject_grade_rubric("Grade 7", 38)["grade"] == "AE1"
-    assert get_subject_grade_rubric("Grade 7", 32)["grade"] == "AE2"
-    assert get_subject_grade_rubric("Grade 7", 10)["grade"] == "BE"
+    expected_bands = [
+        (100, "EE1", 8),
+        (90, "EE1", 8),
+        (89, "EE2", 7),
+        (75, "EE2", 7),
+        (74, "ME1", 6),
+        (58, "ME1", 6),
+        (57, "ME2", 5),
+        (41, "ME2", 5),
+        (40, "AE1", 4),
+        (31, "AE1", 4),
+        (30, "AE2", 3),
+        (21, "AE2", 3),
+        (20, "BE1", 2),
+        (11, "BE1", 2),
+        (10, "BE2", 1),
+        (0, "BE2", 1),
+    ]
+    for score, grade, points in expected_bands:
+        result = get_subject_grade_rubric("Grade 7", score)
+        assert (result["grade"], result["points"]) == (grade, points)
 
 
 def test_school_admin_access_is_scoped_to_their_school():

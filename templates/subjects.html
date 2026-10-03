@@ -1,24 +1,52 @@
 {% extends 'base.html' %}
 {% block content %}
-<h1>Subject Management</h1>
+<h1>Learning Areas</h1>
+<p>Learning-area names are based on the CBC/CBE curriculum designs. <a href="https://kicd.ac.ke/cbc-materials/curriculum-designs/" target="_blank" rel="noopener">Open official KICD curriculum designs</a>.</p>
 <div class="card">
-  <h2>Add Subject</h2>
+  <h2>Add Learning Area</h2>
   <form method="post" class="form-grid">
-    <label>Subject name<input name="name" required></label>
+    <label>Learning area name<input name="name" required></label>
     <label>Short name<input name="short_name"></label>
-    <label>Grade level<input name="grade_level" value="All"></label>
-    <button type="submit">Save Subject</button>
+    <label>Grade level
+      <select name="grade_level" required>
+        <option>All</option>
+        {% for grade in ['Playgroup', 'PP1', 'PP2'] %}<option>{{ grade }}</option>{% endfor %}
+        {% for n in range(1, 13) %}<option>Grade {{ n }}</option>{% endfor %}
+      </select>
+    </label>
+    <button type="submit">Save learning area</button>
   </form>
 </div>
 <div class="card">
-  <h2>Subject List</h2>
+  <h2>Learning Areas</h2>
   <table>
-    <thead><tr><th>Name</th><th>Short Name</th><th>Grade Level</th></tr></thead>
+    <thead><tr><th>Learning Area</th><th>Short Name</th><th>Grade Level</th></tr></thead>
     <tbody>
       {% for subject in subjects %}
       <tr><td>{{ subject.name }}</td><td>{{ subject.short_name }}</td><td>{{ subject.grade_level }}</td></tr>
       {% endfor %}
     </tbody>
+  </table>
+</div>
+<div class="card">
+  <h2>Assign learning areas to teachers</h2>
+  <form method="post" action="{{ url_for('teacher_assignments') }}" class="form-grid">
+    <label>Teacher<select name="teacher_id" required><option value="">Select teacher</option>{% for teacher in teachers %}<option value="{{ teacher.id }}">{{ teacher.full_name }}</option>{% endfor %}</select></label>
+    <label>Learning area<select name="subject_id" required><option value="">Select learning area</option>{% for subject in subjects %}<option value="{{ subject.id }}">{{ subject.name }}</option>{% endfor %}</select></label>
+    <label>Grade
+      <select name="grade" required>
+        {% for grade in ['Playgroup', 'PP1', 'PP2'] %}<option>{{ grade }}</option>{% endfor %}
+        {% for n in range(1, 13) %}<option>Grade {{ n }}</option>{% endfor %}
+      </select>
+    </label>
+    <button type="submit">Assign teacher</button>
+  </form>
+</div>
+<div class="card">
+  <h2>Teaching workload</h2>
+  <table>
+    <thead><tr><th>Teacher</th><th>Grade</th><th>Learning area</th></tr></thead>
+    <tbody>{% for assignment in assignments %}<tr><td>{{ assignment.full_name }}</td><td>{{ assignment.grade }}</td><td>{{ assignment.name }}</td></tr>{% else %}<tr><td colspan="3">No teaching assignments yet.</td></tr>{% endfor %}</tbody>
   </table>
 </div>
 {% endblock %}

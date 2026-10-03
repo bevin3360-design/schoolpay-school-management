@@ -1,50 +1,31 @@
 {% extends 'base.html' %}
 {% block content %}
-<h1>School Dashboard</h1>
+<h1>{{ role|replace('_', ' ')|title }} Dashboard</h1>
+{% if role == 'finance_officer' %}
+<div class="card"><p>Finance workspace: manage term-based fees, payments, receipts, and learner fee statements.</p><a class="button" href="{{ url_for('payments') }}">Record or review payments</a> <a class="button" href="{{ url_for('fees') }}">Manage fees</a></div>
 <div class="stats-grid">
-  <div class="card stat-card">
-    <h3>Students</h3>
-    <p>{{ student_count }}</p>
-  </div>
-  <div class="card stat-card">
-    <h3>Subjects</h3>
-    <p>{{ subject_count }}</p>
-  </div>
-  <div class="card stat-card">
-    <h3>Exams</h3>
-    <p>{{ exam_count }}</p>
-  </div>
-  <div class="card stat-card">
-    <h3>Marks</h3>
-    <p>{{ mark_count }}</p>
-  </div>
-  <div class="card stat-card">
-    <h3>Fees collected today</h3>
-    <p>KSh {{ "{:,}".format(finance.collected_today) }}</p>
-  </div>
-  <div class="card stat-card">
-    <h3>Outstanding fees</h3>
-    <p>KSh {{ "{:,}".format(finance.outstanding) }}</p>
-  </div>
-  <div class="card stat-card">
-    <h3>Unmatched payments</h3>
-    <p><a href="{{ url_for('payments', queue='unmatched') }}">{{ finance.unmatched_count }}</a></p>
-  </div>
-  <div class="card stat-card">
-    <h3>Receipts generated</h3>
-    <p>{{ finance.receipt_count }}</p>
-  </div>
+  <div class="card stat-card"><h3>Fees collected today</h3><p>KSh {{ "{:,}".format(finance.collected_today) }}</p></div>
+  <div class="card stat-card"><h3>Outstanding fees</h3><p>KSh {{ "{:,}".format(finance.outstanding) }}</p></div>
+  <div class="card stat-card"><h3>Unmatched payments</h3><p><a href="{{ url_for('payments', queue='unmatched') }}">{{ finance.unmatched_count }}</a></p></div>
+  <div class="card stat-card"><h3>Receipts generated</h3><p>{{ finance.receipt_count }}</p></div>
 </div>
-<div class="card">
-  <h2>System Features</h2>
-  <ul>
-    <li>Student registration, permanent payment codes, and profile management</li>
-    <li>Grade-based fee setup, payment matching, unmatched-payment review, and receipts</li>
-    <li>Learner fee statements and financial dashboard</li>
-    <li>Subject and exam management</li>
-    <li>Marks entry with automatic totals, averages and grades</li>
-    <li>Report cards with KJSEA and KPSEA-aware grading logic</li>
-    <li>Printable result slips and class analysis</li>
-  </ul>
+{% elif role == 'registrar' %}
+<div class="card"><h2>Learner records</h2><p>Register learners, record parent details, and keep grade and school-stage profiles up to date.</p><a class="button" href="{{ url_for('students') }}">Manage learners</a><p>Total learners: {{ student_count }}</p></div>
+{% elif role == 'teacher' %}
+<div class="card"><h2>Your teaching assignments</h2><p>{{ teacher_workload }} grade and learning-area assignment(s).</p><a class="button" href="{{ url_for('marks') }}">Enter assigned marks</a> <a class="button" href="{{ url_for('reports') }}">Learner results</a></div>
+{% elif role == 'exam_officer' %}
+<div class="card"><h2>Exams and assessment</h2><p>{{ exam_count }} exams · {{ mark_count }} recorded mark(s)</p><a class="button" href="{{ url_for('exams') }}">Manage exams</a> <a class="button" href="{{ url_for('marks') }}">Enter marks</a> <a class="button" href="{{ url_for('reports') }}">Reports</a></div>
+{% else %}
+<div class="card"><h2>Administrative overview</h2><p>Manage staff, school settings, learners, assessments, and finance.</p></div>
+<div class="stats-grid">
+  <div class="card stat-card"><h3>Students</h3><p>{{ student_count }}</p></div>
+  <div class="card stat-card"><h3>Learning areas</h3><p>{{ subject_count }}</p></div>
+  <div class="card stat-card"><h3>Exams</h3><p>{{ exam_count }}</p></div>
+  <div class="card stat-card"><h3>Marks</h3><p>{{ mark_count }}</p></div>
+  <div class="card stat-card"><h3>Fees collected today</h3><p>KSh {{ "{:,}".format(finance.collected_today) }}</p></div>
+  <div class="card stat-card"><h3>Outstanding fees</h3><p>KSh {{ "{:,}".format(finance.outstanding) }}</p></div>
+  <div class="card stat-card"><h3>Unmatched payments</h3><p><a href="{{ url_for('payments', queue='unmatched') }}">{{ finance.unmatched_count }}</a></p></div>
+  <div class="card stat-card"><h3>Receipts generated</h3><p>{{ finance.receipt_count }}</p></div>
 </div>
+{% endif %}
 {% endblock %}

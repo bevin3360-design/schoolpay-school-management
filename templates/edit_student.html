@@ -6,12 +6,56 @@
     <label>Admission number<input name="admission_number" value="{{ student.admission_number }}" required></label>
     <label>Full name<input name="full_name" value="{{ student.full_name }}" required></label>
     <label>Gender<select name="gender"><option {% if student.gender == 'Female' %}selected{% endif %}>Female</option><option {% if student.gender == 'Male' %}selected{% endif %}>Male</option></select></label>
-    <label>Grade<select name="grade"><option {% if student.grade == 'Grade 1' %}selected{% endif %}>Grade 1</option><option {% if student.grade == 'Grade 2' %}selected{% endif %}>Grade 2</option><option {% if student.grade == 'Grade 3' %}selected{% endif %}>Grade 3</option><option {% if student.grade == 'Grade 4' %}selected{% endif %}>Grade 4</option><option {% if student.grade == 'Grade 5' %}selected{% endif %}>Grade 5</option><option {% if student.grade == 'Grade 6' %}selected{% endif %}>Grade 6</option><option {% if student.grade == 'Grade 7' %}selected{% endif %}>Grade 7</option><option {% if student.grade == 'Grade 8' %}selected{% endif %}>Grade 8</option><option {% if student.grade == 'Grade 9' %}selected{% endif %}>Grade 9</option></select></label>
+    <label>School stage
+      <select name="school_stage" required>
+        <option value="Pre-primary" {% if student.school_stage == 'Pre-primary' %}selected{% endif %}>Pre-primary</option>
+        <option value="Primary" {% if student.school_stage == 'Primary' %}selected{% endif %}>Primary</option>
+        <option value="Junior School" {% if student.school_stage == 'Junior School' %}selected{% endif %}>Junior School</option>
+        <option value="Senior School" {% if student.school_stage == 'Senior School' %}selected{% endif %}>Senior School</option>
+      </select>
+    </label>
+    <label>Grade
+      <select name="grade" required>
+        {% for grade in ['Playgroup', 'PP1', 'PP2'] %}
+        <option data-stage="Pre-primary" {% if student.grade == grade %}selected{% endif %}>{{ grade }}</option>
+        {% endfor %}
+        {% for n in range(1, 7) %}
+        <option data-stage="Primary" {% if student.grade == 'Grade ' ~ n %}selected{% endif %}>Grade {{ n }}</option>
+        {% endfor %}
+        {% for n in range(7, 10) %}
+        <option data-stage="Junior School" {% if student.grade == 'Grade ' ~ n %}selected{% endif %}>Grade {{ n }}</option>
+        {% endfor %}
+        {% for n in range(10, 13) %}
+        <option data-stage="Senior School" {% if student.grade == 'Grade ' ~ n %}selected{% endif %}>Grade {{ n }}</option>
+        {% endfor %}
+      </select>
+    </label>
     <label>Class<input name="class_name" value="{{ student.class_name }}"></label>
     <label>Date of birth<input type="date" name="dob" value="{{ student.dob }}"></label>
     <label>Parent name<input name="parent_name" value="{{ student.parent_name }}"></label>
+    <label>Parent relationship
+      <select name="parent_relationship" required>
+        {% for relationship in ['Father', 'Mother', 'Guardian'] %}
+        <option {% if (student.parent_relationship or 'Guardian') == relationship %}selected{% endif %}>{{ relationship }}</option>
+        {% endfor %}
+      </select>
+    </label>
     <label>Parent contact<input name="parent_contact" value="{{ student.parent_contact }}"></label>
     <button type="submit">Update Student</button>
   </form>
 </div>
+<script>
+  const stageField = document.querySelector('[name="school_stage"]');
+  const gradeField = document.querySelector('[name="grade"]');
+  stageField.addEventListener('change', () => {
+    const options = Array.from(gradeField.options);
+    options.forEach((option) => {
+      option.hidden = option.dataset.stage !== stageField.value;
+    });
+    if (gradeField.selectedOptions[0].dataset.stage !== stageField.value) {
+      gradeField.value = options.find((option) => option.dataset.stage === stageField.value).value;
+    }
+  });
+  stageField.dispatchEvent(new Event('change'));
+</script>
 {% endblock %}

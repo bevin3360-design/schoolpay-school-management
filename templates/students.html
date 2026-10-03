@@ -7,10 +7,32 @@
     <label>Admission number<input name="admission_number" required></label>
     <label>Full name<input name="full_name" required></label>
     <label>Gender<select name="gender"><option>Female</option><option>Male</option></select></label>
-    <label>Grade<select name="grade"><option>Grade 1</option><option>Grade 2</option><option>Grade 3</option><option>Grade 4</option><option>Grade 5</option><option>Grade 6</option><option>Grade 7</option><option>Grade 8</option><option>Grade 9</option></select></label>
+    <label>School stage
+      <select name="school_stage" required>
+        <option value="Pre-primary">Pre-primary</option>
+        <option value="Primary">Primary</option>
+        <option value="Junior School" selected>Junior School</option>
+        <option value="Senior School">Senior School</option>
+      </select>
+    </label>
+    <label>Grade
+      <select name="grade" required>
+        <option data-stage="Pre-primary">Playgroup</option>
+        <option data-stage="Pre-primary">PP1</option>
+        <option data-stage="Pre-primary">PP2</option>
+        {% for n in range(1, 7) %}<option data-stage="Primary">Grade {{ n }}</option>{% endfor %}
+        {% for n in range(7, 10) %}<option data-stage="Junior School">Grade {{ n }}</option>{% endfor %}
+        {% for n in range(10, 13) %}<option data-stage="Senior School">Grade {{ n }}</option>{% endfor %}
+      </select>
+    </label>
     <label>Class<input name="class_name"></label>
     <label>Date of birth<input type="date" name="dob"></label>
     <label>Parent name<input name="parent_name"></label>
+    <label>Parent relationship
+      <select name="parent_relationship" required>
+        <option>Father</option><option>Mother</option><option selected>Guardian</option>
+      </select>
+    </label>
     <label>Parent contact<input name="parent_contact"></label>
     <button type="submit">Save Student</button>
   </form>
@@ -22,16 +44,31 @@
     <tbody>
       {% for student in students %}
       <tr>
-        <td><a href="{{ url_for('report_card', student_id=student.id) }}">{{ student.full_name }}</a> <a href="{{ url_for('edit_student', student_id=student.id) }}">(edit)</a></td>
+        <td>{{ student.full_name }} <a href="{{ url_for('edit_student', student_id=student.id) }}">(edit)</a></td>
         <td>{{ student.admission_number }}</td>
         <td>{{ student.payment_code }}</td>
         <td>{{ student.grade }}</td>
         <td>{{ student.class_name }}</td>
-        <td>{{ student.parent_name }}</td>
-        <td><a href="{{ url_for('fee_statement', student_id=student.id) }}">Statement</a></td>
+        <td>{{ student.parent_name }}{% if student.parent_name %} ({{ student.parent_relationship or 'Guardian' }}){% endif %}</td>
+        <td>{% if is_super_admin or current_role == 'admin' %}<a href="{{ url_for('fee_statement', student_id=student.id) }}">Statement</a>{% else %}—{% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
+<script>
+  const stageField = document.querySelector('[name="school_stage"]');
+  const gradeField = document.querySelector('[name="grade"]');
+  const filterGrades = () => {
+    const options = Array.from(gradeField.options);
+    options.forEach((option) => {
+      option.hidden = option.dataset.stage !== stageField.value;
+    });
+    if (gradeField.selectedOptions[0].dataset.stage !== stageField.value) {
+      gradeField.value = options.find((option) => option.dataset.stage === stageField.value).value;
+    }
+  };
+  stageField.addEventListener('change', filterGrades);
+  filterGrades();
+</script>
 {% endblock %}
