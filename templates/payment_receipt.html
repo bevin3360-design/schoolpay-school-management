@@ -1,0 +1,20 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="card receipt-card">
+  <div class="actions"><button type="button" onclick="window.print()">Print receipt</button></div>
+  <h1>{{ receipt.school_name }}</h1>
+  <h2>Official payment receipt</h2>
+  <p><strong>Receipt:</strong> {{ receipt.receipt_number }}</p>
+  <p><strong>Date:</strong> {{ receipt.received_at }}</p>
+  <p><strong>Learner:</strong> {{ receipt.full_name }}</p>
+  <p><strong>Admission:</strong> {{ receipt.admission_number }}</p>
+  <p><strong>Payment code:</strong> {{ receipt.payment_code }}</p>
+  <p><strong>Amount:</strong> KSh {{ "{:,}".format(receipt.amount) }}</p>
+  <p><strong>Previous balance:</strong> KSh {{ "{:,}".format(receipt.previous_balance) }}</p>
+  <p><strong>New balance:</strong> KSh {{ "{:,}".format(receipt.new_balance) }}</p>
+  <p><strong>Channel:</strong> {{ receipt.channel }}</p>
+  <p><strong>Transaction:</strong> {{ receipt.transaction_code or 'Not provided' }}</p>
+  <p><strong>Reference:</strong> {{ receipt.reference }}</p>
+  <p><a href="{{ url_for('fee_statement', student_id=receipt.student_id) }}">View learner statement</a></p>
+</div>
+{% endblock %}

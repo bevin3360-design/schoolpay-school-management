@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="card">
+  <h2>Teacher Management</h2>
+  <p>Create teacher accounts that can access the school records system.</p>
+  <form method="post" class="form-grid">
+    <label>
+      Full Name
+      <input name="full_name" required>
+    </label>
+    <label>
+      Username
+      <input name="username" required>
+    </label>
+    <label>
+      Password
+      <input name="password" type="password" required>
+    </label>
+    <label>
+      <span>&nbsp;</span>
+      <button type="submit">Add Teacher</button>
+    </label>
+  </form>
+</div>
+<div class="card">
+  <h3>Existing Teachers</h3>
+  <table>
+    <thead>
+      <tr><th>Full Name</th><th>Username</th></tr>
+    </thead>
+    <tbody>
+      {% for teacher in teachers %}
+      <tr>
+        <td>{{ teacher.full_name }}</td>
+        <td>{{ teacher.username }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

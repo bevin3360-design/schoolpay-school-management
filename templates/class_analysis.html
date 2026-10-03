@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>Class Analysis</h1>
+<div class="card">
+  <h2>Classroom Performance Overview</h2>
+  {% for analysis in analyses %}
+  <div class="analysis-block">
+    <h3>{{ analysis.group_name }}</h3>
+    <p><strong>Students:</strong> {{ analysis.student_count }} | <strong>Class Average:</strong> {{ analysis.average }}</p>
+    <ul>
+      {% for subject_name, average in analysis.subject_averages %}
+      <li>{{ subject_name }}: {{ average }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

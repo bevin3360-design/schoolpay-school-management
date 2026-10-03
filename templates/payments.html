@@ -1,0 +1,63 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>Payments & Receipts</h1>
+<div class="card">
+  <h2>Record a payment</h2>
+  <p>Payments with an unrecognized learner reference or a payer phone that does not match the learner record require bursar verification.</p>
+  <form method="post" class="form-grid">
+    <label>Amount (KSh, whole shillings)<input name="amount" type="number" min="1" step="1" required></label>
+    <label>Channel
+      <select name="channel" required>
+        <option>M-Pesa</option><option>Bank</option><option>Cash</option><option>Other</option>
+      </select>
+    </label>
+    <label>Transaction code<input name="transaction_code" autocomplete="off"></label>
+    <label>Payer phone<input name="payer_phone" type="tel" autocomplete="tel"></label>
+    <label>Learner payment code or admission number<input name="reference" required></label>
+    <button type="submit">Record payment</button>
+  </form>
+</div>
+<div class="card">
+  <h2>{% if unmatched_only %}Unmatched payments{% else %}Recent payments{% endif %}</h2>
+  {% if unmatched_only %}<p><a href="{{ url_for('payments') }}">Show all payments</a></p>{% else %}<p><a href="{{ url_for('payments', queue='unmatched') }}">Show unmatched only</a></p>{% endif %}
+  <table>
+    <thead><tr><th>Date</th><th>Amount</th><th>Channel</th><th>Transaction</th><th>Reference / learner</th><th>Status</th><th>Receipt / review</th></tr></thead>
+    <tbody>
+      {% for payment in payments if not unmatched_only or payment.status == 'pending' %}
+      <tr>
+        <td>{{ payment.received_at }}</td>
+        <td>KSh {{ "{:,}".format(payment.amount) }}</td>
+        <td>{{ payment.channel }}</td>
+        <td>{{ payment.transaction_code or '-' }}</td>
+        <td>
+          {{ payment.reference }}
+          {% if payment.student_name %}<br>{{ payment.student_name }} ({{ payment.admission_number }}){% endif %}
+          {% if payment.suggested_name %}<br>Possible learner: {{ payment.suggested_name }}{% endif %}
+        </td>
+        <td>{{ 'Matched' if payment.status == 'matched' else 'Needs verification' }}</td>
+        <td>
+          {% if payment.receipt_id %}
+          <a href="{{ url_for('payment_receipt', receipt_id=payment.receipt_id) }}">{{ payment.receipt_number }}</a>
+          {% else %}
+          <form method="post" action="{{ url_for('verify_payment', payment_id=payment.id) }}" class="form-grid">
+            <label>Assign to learner
+              <select name="student_id" required>
+                <option value="">Select learner</option>
+                {% for student in students %}
+                <option value="{{ student.id }}" {% if payment.suggested_student_id == student.id %}selected{% endif %}>{{ student.full_name }} ({{ student.admission_number }})</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>Verification note<input name="verification_note" required></label>
+            <button type="submit">Verify & issue receipt</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7">No payments to show.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

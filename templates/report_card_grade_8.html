@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="report-card {% if print_mode %}print-mode{% endif %}">
+  <div class="report-header">
+    <div>
+      <h1>{{ school_settings.name }}</h1>
+      <p>{{ school_settings.motto }}</p>
+    </div>
+    {% if school_settings.logo_url %}<img src="{{ school_settings.logo_url }}" alt="school logo" class="report-logo">{% endif %}
+  </div>
+  <h2>Grade 8 Learner Report</h2>
+  <p>This report card is tailored for Grade 8 learners using the junior-school performance structure.</p>
+  <div class="report-summary-grid">
+    <div class="card">
+      <p><strong>Name:</strong> {{ report.student.full_name }}</p>
+      <p><strong>Admission:</strong> {{ report.student.admission_number }}</p>
+      <p><strong>Grade:</strong> {{ report.student.grade }}</p>
+      <p><strong>Class:</strong> {{ report.student.class_name }}</p>
+    </div>
+    <div class="card">
+      <p><strong>Overall Average:</strong> {{ report.overall_average }}</p>
+      <p><strong>Overall Grade:</strong> {{ report.overall_grade.grade }} ({{ report.overall_grade.descriptor }})</p>
+      <p><strong>Performance Band:</strong> {{ report.performance_band }}</p>
+      <p><strong>Position:</strong> {{ report.position }}</p>
+    </div>
+  </div>
+  <h3>Subject Summary</h3>
+  <table>
+    <thead><tr><th>Subject</th><th>Average</th><th>Grade</th></tr></thead>
+    <tbody>
+      {% for item in report.subject_summary %}
+      <tr><td>{{ item.name }}</td><td>{{ item.average }}</td><td>{{ item.grade.grade }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="insight-grid">
+    <div class="card"><h3>Strengths</h3><ul>{% for subject in report.strength_subjects %}<li>{{ subject }}</li>{% endfor %}</ul></div>
+    <div class="card"><h3>Growth Areas</h3><ul>{% for subject in report.weak_subjects %}<li>{{ subject }}</li>{% endfor %}</ul></div>
+  </div>
+  <div class="card remark-block"><h3>Teacher Comment</h3><p>{{ report.remark }}</p></div>
+  {% if not print_mode %}<div class="actions"><a class="button" href="{{ url_for('print_report', student_id=report.student.id) }}" target="_blank">Print Result Slip</a></div>{% endif %}
+</div>
+{% endblock %}

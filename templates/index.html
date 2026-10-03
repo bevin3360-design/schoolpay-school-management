@@ -1,0 +1,50 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>School Dashboard</h1>
+<div class="stats-grid">
+  <div class="card stat-card">
+    <h3>Students</h3>
+    <p>{{ student_count }}</p>
+  </div>
+  <div class="card stat-card">
+    <h3>Subjects</h3>
+    <p>{{ subject_count }}</p>
+  </div>
+  <div class="card stat-card">
+    <h3>Exams</h3>
+    <p>{{ exam_count }}</p>
+  </div>
+  <div class="card stat-card">
+    <h3>Marks</h3>
+    <p>{{ mark_count }}</p>
+  </div>
+  <div class="card stat-card">
+    <h3>Fees collected today</h3>
+    <p>KSh {{ "{:,}".format(finance.collected_today) }}</p>
+  </div>
+  <div class="card stat-card">
+    <h3>Outstanding fees</h3>
+    <p>KSh {{ "{:,}".format(finance.outstanding) }}</p>
+  </div>
+  <div class="card stat-card">
+    <h3>Unmatched payments</h3>
+    <p><a href="{{ url_for('payments', queue='unmatched') }}">{{ finance.unmatched_count }}</a></p>
+  </div>
+  <div class="card stat-card">
+    <h3>Receipts generated</h3>
+    <p>{{ finance.receipt_count }}</p>
+  </div>
+</div>
+<div class="card">
+  <h2>System Features</h2>
+  <ul>
+    <li>Student registration, permanent payment codes, and profile management</li>
+    <li>Grade-based fee setup, payment matching, unmatched-payment review, and receipts</li>
+    <li>Learner fee statements and financial dashboard</li>
+    <li>Subject and exam management</li>
+    <li>Marks entry with automatic totals, averages and grades</li>
+    <li>Report cards with KJSEA and KPSEA-aware grading logic</li>
+    <li>Printable result slips and class analysis</li>
+  </ul>
+</div>
+{% endblock %}

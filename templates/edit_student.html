@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="card">
+  <h2>Edit Student</h2>
+  <form method="post" class="form-grid">
+    <label>Admission number<input name="admission_number" value="{{ student.admission_number }}" required></label>
+    <label>Full name<input name="full_name" value="{{ student.full_name }}" required></label>
+    <label>Gender<select name="gender"><option {% if student.gender == 'Female' %}selected{% endif %}>Female</option><option {% if student.gender == 'Male' %}selected{% endif %}>Male</option></select></label>
+    <label>Grade<select name="grade"><option {% if student.grade == 'Grade 1' %}selected{% endif %}>Grade 1</option><option {% if student.grade == 'Grade 2' %}selected{% endif %}>Grade 2</option><option {% if student.grade == 'Grade 3' %}selected{% endif %}>Grade 3</option><option {% if student.grade == 'Grade 4' %}selected{% endif %}>Grade 4</option><option {% if student.grade == 'Grade 5' %}selected{% endif %}>Grade 5</option><option {% if student.grade == 'Grade 6' %}selected{% endif %}>Grade 6</option><option {% if student.grade == 'Grade 7' %}selected{% endif %}>Grade 7</option><option {% if student.grade == 'Grade 8' %}selected{% endif %}>Grade 8</option><option {% if student.grade == 'Grade 9' %}selected{% endif %}>Grade 9</option></select></label>
+    <label>Class<input name="class_name" value="{{ student.class_name }}"></label>
+    <label>Date of birth<input type="date" name="dob" value="{{ student.dob }}"></label>
+    <label>Parent name<input name="parent_name" value="{{ student.parent_name }}"></label>
+    <label>Parent contact<input name="parent_contact" value="{{ student.parent_contact }}"></label>
+    <button type="submit">Update Student</button>
+  </form>
+</div>
+{% endblock %}

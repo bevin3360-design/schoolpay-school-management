@@ -1,0 +1,49 @@
+:root {
+  color-scheme: light;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  --primary: #0f4c81;
+  --accent: #f2b84b;
+  --background: #f6f8fb;
+  --card: #ffffff;
+  --text: #233142;
+}
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--text);
+}
+.app-shell { display: flex; min-height: 100vh; }
+.sidebar { width: 260px; background: var(--primary); color: white; padding: 24px 16px; }
+.brand { display: flex; gap: 12px; align-items: center; margin-bottom: 24px; }
+.brand-logo, .report-logo { width: 64px; height: 64px; object-fit: contain; border-radius: 12px; background: white; padding: 4px; }
+.sidebar nav { display: flex; flex-direction: column; gap: 8px; }
+.sidebar a { color: white; text-decoration: none; padding: 8px 10px; border-radius: 8px; }
+.sidebar a:hover { background: rgba(255,255,255,0.14); }
+.content { flex: 1; padding: 24px; }
+.card { background: var(--card); border-radius: 16px; padding: 18px; box-shadow: 0 8px 24px rgba(0,0,0,0.06); margin-bottom: 18px; }
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin: 18px 0; }
+.stat-card p { font-size: 2rem; font-weight: 700; margin: 6px 0 0; color: var(--primary); }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+label { display: flex; flex-direction: column; gap: 6px; font-weight: 600; }
+input, select, button, textarea { padding: 10px 12px; border: 1px solid #d7dee9; border-radius: 10px; font-size: 14px; }
+button, .button { background: var(--primary); color: white; border: none; cursor: pointer; text-decoration: none; display: inline-block; }
+table { width: 100%; border-collapse: collapse; } th, td { padding: 10px; border-bottom: 1px solid #e8edf3; text-align: left; }
+.flash-list { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.flash-list li { background: #ecfdf3; color: #17613c; padding: 10px 14px; border-radius: 10px; }
+.report-card { background: white; padding: 28px; border-radius: 18px; box-shadow: 0 12px 30px rgba(0,0,0,0.08); border: 1px solid #e8edf3; }
+.school-switcher { margin-bottom: 16px; display: flex; flex-direction: column; gap: 6px; }
+.school-switcher select { width: 100%; }
+.signature-block { margin-top: 18px; display: flex; justify-content: flex-end; }
+.signature-img { max-height: 80px; }
+.report-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 2px solid var(--primary); }
+.report-header h1 { margin: 0 0 6px; color: var(--primary); font-size: 1.6rem; }
+.report-header p { margin: 0; color: #5d6b7a; }
+.report-summary-grid, .insight-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+.report-summary-grid .card, .insight-grid .card { margin-bottom: 0; }
+.report-summary-grid p { margin: 6px 0; }
+.report-card h2, .report-card h3 { color: var(--primary); }
+.report-card table { margin-top: 8px; }
+.report-card th { background: #f5f8fc; font-weight: 700; }
+.remark-block { margin-top: 18px; background: #fdfcf7; border-left: 4px solid var(--accent); }
+.print-mode { box-shadow: none; border: 1px solid #e2e8f0; }
+@media print { .sidebar, .actions, .card { box-shadow: none !important; } .content { padding: 0; } body { background: white; } .report-card { border: none; padding: 0; } }

@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>Exam Management</h1>
+<div class="card">
+  <h2>Create Exam</h2>
+  <form method="post" class="form-grid">
+    <label>Name<input name="name" required></label>
+    <label>Type<select name="exam_type"><option>Opener</option><option>Midterm</option><option>End Term</option><option>Mock</option></select></label>
+    <label>Term<input name="term" value="Term 1"></label>
+    <label>Grade level<input name="grade_level" value="All"></label>
+    <button type="submit">Create Exam</button>
+  </form>
+</div>
+<div class="card">
+  <h2>Exam List</h2>
+  <table>
+    <thead><tr><th>Name</th><th>Type</th><th>Term</th><th>Grade</th></tr></thead>
+    <tbody>
+      {% for exam in exams %}
+      <tr><td>{{ exam.name }}</td><td>{{ exam.exam_type }}</td><td>{{ exam.term }}</td><td>{{ exam.grade_level }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

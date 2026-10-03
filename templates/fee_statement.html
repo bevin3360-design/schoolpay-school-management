@@ -1,0 +1,30 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="card">
+  <div class="actions"><button type="button" onclick="window.print()">Print statement</button></div>
+  <h1>Fee statement</h1>
+  <p><strong>Learner:</strong> {{ student.full_name }}</p>
+  <p><strong>Admission:</strong> {{ student.admission_number }} · <strong>Payment code:</strong> {{ student.payment_code }}</p>
+  <div class="stats-grid">
+    <div class="card stat-card"><h3>Total charges</h3><p>KSh {{ "{:,}".format(total_charged) }}</p></div>
+    <div class="card stat-card"><h3>Total paid</h3><p>KSh {{ "{:,}".format(total_paid) }}</p></div>
+    <div class="card stat-card"><h3>Balance</h3><p>KSh {{ "{:,}".format(balance) }}</p></div>
+  </div>
+  <table>
+    <thead><tr><th>Date</th><th>Description</th><th>Debit</th><th>Credit</th><th>Balance</th><th>Receipt</th></tr></thead>
+    <tbody>
+      {% for entry in entries %}
+      <tr>
+        <td>{{ entry.created_at }}</td><td>{{ entry.description }}</td>
+        <td>{% if entry.debit %}KSh {{ "{:,}".format(entry.debit) }}{% else %}—{% endif %}</td>
+        <td>{% if entry.credit %}KSh {{ "{:,}".format(entry.credit) }}{% else %}—{% endif %}</td>
+        <td>KSh {{ "{:,}".format(entry.balance) }}</td>
+        <td>{% if entry.receipt_id %}<a href="{{ url_for('payment_receipt', receipt_id=entry.receipt_id) }}">View</a>{% else %}—{% endif %}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6">No fee charges or verified payments recorded.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

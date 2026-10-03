@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ school_settings.name }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <img src="{{ school_settings.logo_url or '/static/sample-report-form.png' }}" alt="school logo" class="brand-logo">
+          <div>
+            <strong>{{ school_settings.name }}</strong>
+            <p>{{ school_settings.motto }}</p>
+          </div>
+        </div>
+        <nav>
+          <div class="school-switcher">
+            <strong>Active School</strong>
+            <select onchange="window.location.href='/switch-school/' + this.value">
+              {% for school in available_schools %}
+              <option value="{{ school.id }}" {% if school.id == school_settings.id %}selected{% endif %}>{{ school.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <a href="{{ url_for('index') }}">Dashboard</a>
+          <a href="{{ url_for('students') }}">Student Management</a>
+          <a href="{{ url_for('fees') }}">Fee Structure</a>
+          <a href="{{ url_for('payments') }}">Payments & Receipts</a>
+          <a href="{{ url_for('teachers') }}">Teacher Management</a>
+          <a href="{{ url_for('subjects') }}">Subject Management</a>
+          <a href="{{ url_for('exams') }}">Exam Management</a>
+          <a href="{{ url_for('marks') }}">Marks Entry</a>
+          <a href="{{ url_for('reports') }}">Reports</a>
+          <a href="{{ url_for('class_analysis') }}">Class Analysis</a>
+          <a href="{{ url_for('settings') }}">Branding</a>
+          {% if session.get('teacher_logged_in') %}
+          <a href="{{ url_for('logout') }}">Logout</a>
+          {% endif %}
+        </nav>
+      </aside>
+      <main class="content">
+        {% with messages = get_flashed_messages() %}
+        {% if messages %}
+        <ul class="flash-list">
+          {% for message in messages %}
+          <li>{{ message }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+        {% endwith %}
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </body>
+</html>

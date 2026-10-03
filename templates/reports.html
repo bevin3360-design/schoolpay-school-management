@@ -1,0 +1,22 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>Reports</h1>
+<div class="card">
+  <h2>Student Overview</h2>
+  <table>
+    <thead><tr><th>Student</th><th>Grade</th><th>Average</th><th>Grade</th><th>Position</th><th>Action</th></tr></thead>
+    <tbody>
+      {% for report in student_reports %}
+      <tr>
+        <td>{{ report.student.full_name }}</td>
+        <td>{{ report.student.grade }}</td>
+        <td>{{ report.overall_average }}</td>
+        <td>{{ report.overall_grade.grade }}</td>
+        <td>{{ report.position }}</td>
+        <td><a href="{{ url_for('report_card', student_id=report.student.id) }}">Open</a> | <a href="{{ url_for('print_report', student_id=report.student.id) }}" target="_blank">Print</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>School Branding</h1>
+<div class="card">
+  <form method="post" enctype="multipart/form-data" class="form-grid">
+    <label>School name<input name="name" value="{{ current_settings.name }}"></label>
+    <label>Motto<input name="motto" value="{{ current_settings.motto }}"></label>
+    <label>Logo URL<input name="logo_url" value="{{ current_settings.logo_url or '/static/sample-report-form.png' }}"></label>
+    <label>Upload logo<input type="file" name="logo_file"></label>
+    <label>Signature URL<input name="signature_url" value="{{ current_settings.signature_url or '' }}"></label>
+    <label>Upload signature<input type="file" name="signature_file"></label>
+    <label>Report template<select name="report_template">
+      <option value="default" {% if current_settings.report_template == 'default' %}selected{% endif %}>Default</option>
+      <option value="grade_6" {% if current_settings.report_template == 'grade_6' %}selected{% endif %}>Grade 6</option>
+      <option value="grade_8" {% if current_settings.report_template == 'grade_8' %}selected{% endif %}>Grade 8</option>
+      <option value="grade_9" {% if current_settings.report_template == 'grade_9' %}selected{% endif %}>Grade 9</option>
+    </select></label>
+    <button type="submit">Update Branding</button>
+  </form>
+</div>
+{% endblock %}
