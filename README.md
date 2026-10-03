@@ -16,10 +16,25 @@ python -m pip install -r requirements.txt
 python app.py
 ```
 
-Open <http://127.0.0.1:5000>. The current development seed account is
-`teacher` / `password`. Change the authentication and secret-key configuration
-before any deployment. Do not use real learner or financial data with this
-development application.
+Open <http://127.0.0.1:5000>. The development-only seed account is
+`teacher` / `password`. Do not use it or development-seeded data in production.
+
+## Production requirements
+
+The app fails to start in production unless `APP_ENV=production` and a unique
+`SECRET_KEY` are configured. The first production startup also requires
+`INITIAL_SCHOOL_NAME`, `INITIAL_ADMIN_USERNAME`, and
+`INITIAL_ADMIN_PASSWORD` (at least 12 characters); the initial admin password
+is stored as a hash. Production startup does not create demo learners or the
+development accounts. It refuses to use a database containing the default
+development usernames.
+
+Set `DATABASE_PATH` and `UPLOAD_FOLDER` to locations on persistent storage.
+The default SQLite database and uploads are local files and will be lost on
+hosts with ephemeral filesystems. Configure HTTPS and persistent backups before
+storing real learner or payment records. Real deployments also need an
+appropriate production WSGI server and a host plan that supports persistent
+storage.
 
 ## Run tests
 

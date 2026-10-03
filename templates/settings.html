@@ -3,6 +3,7 @@
 <h1>School Branding</h1>
 <div class="card">
   <form method="post" enctype="multipart/form-data" class="form-grid">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label>School name<input name="name" value="{{ current_settings.name }}"></label>
     <label>Motto<input name="motto" value="{{ current_settings.motto }}"></label>
     <label>Logo URL<input name="logo_url" value="{{ current_settings.logo_url or '/static/sample-report-form.png' }}"></label>

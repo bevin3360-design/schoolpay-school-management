@@ -4,6 +4,7 @@
 <div class="card">
   <h2>Add Student</h2>
   <form method="post" class="form-grid">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label>Admission number<input name="admission_number" required></label>
     <label>Full name<input name="full_name" required></label>
     <label>Gender<select name="gender"><option>Female</option><option>Male</option></select></label>

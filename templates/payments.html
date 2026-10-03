@@ -5,6 +5,7 @@
   <h2>Record a payment</h2>
   <p>Select a learner and the term for which the payment is being recorded. Payer phone numbers must be ten digits.</p>
   <form method="post" class="form-grid">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label>Amount (KSh, whole shillings)<input name="amount" type="number" min="1" step="1" required></label>
     <label>Channel
       <select name="channel" required>
@@ -63,6 +64,7 @@
           <a href="{{ url_for('payment_receipt', receipt_id=payment.receipt_id) }}">{{ payment.receipt_number }}</a>
           {% else %}
           <form method="post" action="{{ url_for('verify_payment', payment_id=payment.id) }}" class="form-grid">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <label>Assign to learner
               <select name="student_id" required>
                 <option value="">Select learner</option>

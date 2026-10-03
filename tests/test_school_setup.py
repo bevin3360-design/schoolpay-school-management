@@ -11,6 +11,7 @@ from openpyxl import Workbook
 @pytest.fixture
 def school_app(tmp_path, monkeypatch):
     monkeypatch.setattr(app_module, "DB_PATH", str(tmp_path / "school.db"))
+    app_module.app.config["TESTING"] = True
     app_module.init_db()
 
     def login_as(role):
@@ -39,8 +40,92 @@ def school_app(tmp_path, monkeypatch):
     return login_as
 
 
+def test_production_bootstrap_creates_only_configured_admin(tmp_path, monkeypatch):
+    monkeypatch.setattr(app_module, "DB_PATH", str(tmp_path / "production.db"))
+    monkeypatch.setattr(app_module, "APP_ENV", "production")
+    monkeypatch.setenv("INITIAL_SCHOOL_NAME", "Production School")
+    monkeypatch.setenv("INITIAL_ADMIN_USERNAME", "owner")
+    monkeypatch.setenv("INITIAL_ADMIN_PASSWORD", "very-secure-password")
+
+    app_module.init_db()
+
+    with app_module.get_db() as conn:
+        school = conn.execute("SELECT name FROM schools").fetchone()
+        teacher = conn.execute(
+            "SELECT username, password, role FROM teachers"
+        ).fetchone()
+        teacher_count = conn.execute("SELECT COUNT(*) FROM teachers").fetchone()[0]
+        school_count = conn.execute("SELECT COUNT(*) FROM schools").fetchone()[0]
+        student_count = conn.execute("SELECT COUNT(*) FROM students").fetchone()[0]
+    assert school["name"] == "Production School"
+    assert teacher["username"] == "owner"
+    assert teacher["role"] == "admin"
+    assert teacher["password"] != "very-secure-password"
+    assert app_module.verify_password(
+        teacher["password"], "very-secure-password"
+    )
+    assert teacher_count == 1
+    assert school_count == 1
+    assert student_count == 0
+
+
+def test_production_refuses_development_seed_database(tmp_path, monkeypatch):
+    monkeypatch.setattr(app_module, "DB_PATH", str(tmp_path / "seeded.db"))
+    app_module.app.config["TESTING"] = True
+    app_module.init_db()
+    monkeypatch.setattr(app_module, "APP_ENV", "production")
+
+    with pytest.raises(RuntimeError, match="development seed accounts"):
+        app_module.init_db()
+
+
+def test_unsafe_requests_require_csrf_token():
+    was_testing = app_module.app.testing
+    app_module.app.testing = False
+    client = app_module.app.test_client()
+    try:
+        missing = client.post("/login", data={"username": "nobody"})
+        assert missing.status_code == 400
+        with client.session_transaction() as session:
+            session["csrf_token"] = "known-test-token"
+        valid = client.post(
+            "/login",
+            data={"username": "nobody", "csrf_token": "known-test-token"},
+        )
+        assert valid.status_code == 200
+    finally:
+        app_module.app.testing = was_testing
+
+
+def test_logged_in_staff_can_change_password(school_app):
+    client = school_app("teacher")
+    response = client.post(
+        "/change-password",
+        data={
+            "current_password": "test-password",
+            "new_password": "a-strong-new-password",
+            "confirm_password": "a-strong-new-password",
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Sign in again with your new password" in response.data
+    with app_module.get_db() as conn:
+        password = conn.execute(
+            "SELECT password FROM teachers WHERE username = 'teacher_user'"
+        ).fetchone()["password"]
+    assert app_module.verify_password(password, "a-strong-new-password")
+    assert client.get("/").status_code == 302
+
+
 def test_role_dashboards_enforce_finance_scope(school_app):
     client = school_app("finance_officer")
+    with app_module.get_db() as conn:
+        password = conn.execute(
+            "SELECT password FROM teachers WHERE username = 'finance_officer_user'"
+        ).fetchone()["password"]
+    assert app_module.verify_password(password, "test-password")
 
     dashboard = client.get("/")
     assert dashboard.status_code == 200

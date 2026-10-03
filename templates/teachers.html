@@ -4,6 +4,7 @@
   <h2>Teacher Management</h2>
   <p>School administrators create staff accounts and choose each staff member's role. Developer super-administration remains a separate platform account.</p>
   <form method="post" class="form-grid">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label>
       Full Name
       <input name="full_name" required>

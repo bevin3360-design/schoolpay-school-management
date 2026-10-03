@@ -5,6 +5,7 @@ import pytest
 @pytest.fixture
 def finance_client(tmp_path, monkeypatch):
     monkeypatch.setattr(app_module, "DB_PATH", str(tmp_path / "school.db"))
+    app_module.app.config["TESTING"] = True
     app_module.init_db()
     client = app_module.app.test_client()
     with client.session_transaction() as session:

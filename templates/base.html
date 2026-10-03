@@ -20,11 +20,15 @@
           {% if is_super_admin %}
           <div class="school-switcher">
             <strong>Active School</strong>
-            <select onchange="window.location.href='/switch-school/' + this.value">
+            <form method="post" action="{{ url_for('switch_school') }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <select name="school_id" onchange="this.form.submit()">
               {% for school in available_schools %}
               <option value="{{ school.id }}" {% if school.id == school_settings.id %}selected{% endif %}>{{ school.name }}</option>
               {% endfor %}
-            </select>
+              </select>
+              <button type="submit">Switch school</button>
+            </form>
           </div>
           {% endif %}
           <a href="{{ url_for('index') }}">Dashboard</a>
@@ -51,7 +55,11 @@
           <a href="{{ url_for('settings') }}">Branding</a>
           {% endif %}
           {% if session.get('teacher_logged_in') %}
-          <a href="{{ url_for('logout') }}">Logout</a>
+          <a href="{{ url_for('change_password') }}">Change password</a>
+          <form method="post" action="{{ url_for('logout') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit">Logout</button>
+          </form>
           {% endif %}
         </nav>
       </aside>

@@ -1,24 +1,73 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from io import BytesIO
+import hmac
 import os
 import re
+import secrets
 import sqlite3
 import zipfile
 import xml.etree.ElementTree as ET
 from functools import wraps
 from typing import Any, Dict, List
 from werkzeug.utils import secure_filename
+from werkzeug.security import check_password_hash, generate_password_hash
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font
 
-from flask import Flask, abort, flash, has_request_context, redirect, render_template, request, send_file, session, url_for
+from flask import Flask, abort, flash, has_request_context, redirect, render_template, request, send_file, send_from_directory, session, url_for
 
 app = Flask(__name__)
-app.secret_key = "school-report-secret"
-app.config["UPLOAD_FOLDER"] = os.path.join(app.root_path, "static", "uploads")
+APP_ENV = os.environ.get("APP_ENV", "development").lower()
+if APP_ENV not in {"development", "production"}:
+    raise RuntimeError("APP_ENV must be either development or production.")
+app.config["APP_ENV"] = APP_ENV
+secret_key = os.environ.get("SECRET_KEY")
+if APP_ENV == "production" and not secret_key:
+    raise RuntimeError("SECRET_KEY must be configured in production.")
+app.secret_key = secret_key or secrets.token_hex(32)
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=APP_ENV == "production",
+)
+app.permanent_session_lifetime = timedelta(hours=8)
+app.config["UPLOAD_FOLDER"] = os.environ.get(
+    "UPLOAD_FOLDER", os.path.join(app.root_path, "static", "uploads")
+)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
-DB_PATH = os.path.join(app.root_path, "school.db")
+DB_PATH = os.environ.get("DATABASE_PATH", os.path.join(app.root_path, "school.db"))
 os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
+
+
+def password_is_hashed(password: str) -> bool:
+    return password.startswith(("pbkdf2:", "scrypt:"))
+
+
+def verify_password(stored_password: str, supplied_password: str) -> bool:
+    if password_is_hashed(stored_password):
+        return check_password_hash(stored_password, supplied_password)
+    return hmac.compare_digest(stored_password, supplied_password)
+
+
+def csrf_token() -> str:
+    token = session.get("csrf_token")
+    if token is None:
+        token = secrets.token_urlsafe(32)
+        session["csrf_token"] = token
+    return token
+
+
+app.jinja_env.globals["csrf_token"] = csrf_token
+
+
+@app.before_request
+def protect_unsafe_requests() -> None:
+    if app.testing or request.method in {"GET", "HEAD", "OPTIONS", "TRACE"}:
+        return
+    expected = session.get("csrf_token")
+    submitted = request.form.get("csrf_token")
+    if not expected or not submitted or not hmac.compare_digest(expected, submitted):
+        abort(400, description="CSRF token missing or invalid.")
 
 
 def get_db() -> sqlite3.Connection:
@@ -252,6 +301,71 @@ def init_db() -> None:
             WHERE school_stage IS NULL OR school_stage = ''
             """
         )
+
+        if APP_ENV == "production":
+            school = conn.execute(
+                "SELECT id FROM schools ORDER BY id LIMIT 1"
+            ).fetchone()
+            if school is None:
+                school_name = (os.environ.get("INITIAL_SCHOOL_NAME") or "").strip()
+                if not school_name:
+                    raise RuntimeError(
+                        "INITIAL_SCHOOL_NAME is required to initialize production."
+                    )
+                cursor = conn.execute(
+                    """
+                    INSERT INTO schools (name, motto, logo_url, signature_url, report_template)
+                    VALUES (?, '', '', '', 'default')
+                    """,
+                    (school_name,),
+                )
+                school_id = int(cursor.lastrowid)
+            else:
+                school_id = int(school["id"])
+
+            user_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM teachers"
+            ).fetchone()["count"]
+            if not user_count:
+                username = (os.environ.get("INITIAL_ADMIN_USERNAME") or "").strip()
+                password = os.environ.get("INITIAL_ADMIN_PASSWORD") or ""
+                if not username or len(password) < 12:
+                    raise RuntimeError(
+                        "Set INITIAL_ADMIN_USERNAME and a 12-character "
+                        "INITIAL_ADMIN_PASSWORD to initialize production."
+                    )
+                conn.execute(
+                    """
+                    INSERT INTO teachers
+                        (username, password, full_name, school_id, role, is_super_admin)
+                    VALUES (?, ?, ?, ?, 'admin', 0)
+                    """,
+                    (
+                        username,
+                        generate_password_hash(password),
+                        os.environ.get("INITIAL_ADMIN_FULL_NAME", "School Administrator"),
+                        school_id,
+                    ),
+                )
+
+            if conn.execute(
+                "SELECT 1 FROM teachers WHERE username IN ('teacher', 'teacher2') LIMIT 1"
+            ).fetchone():
+                raise RuntimeError(
+                    "Remove the development seed accounts before using this database."
+                )
+            for teacher in conn.execute(
+                "SELECT id, password FROM teachers"
+            ).fetchall():
+                if not password_is_hashed(teacher["password"]):
+                    conn.execute(
+                        "UPDATE teachers SET password = ? WHERE id = ?",
+                        (
+                            generate_password_hash(teacher["password"]),
+                            teacher["id"],
+                        ),
+                    )
+            return
 
         conn.execute(
             "INSERT OR IGNORE INTO schools (id, name, motto, logo_url, signature_url, report_template) VALUES (1, ?, ?, ?, ?, ?)",
@@ -550,12 +664,21 @@ def create_payment_receipt(
 
 
 def embed_school_logo(workbook_stream: BytesIO, logo_url: str | None) -> BytesIO:
-    if not logo_url or not logo_url.startswith("/static/"):
+    if not logo_url:
         workbook_stream.seek(0)
         return workbook_stream
-    logo_path = os.path.join(
-        app.root_path, logo_url.lstrip("/").replace("/", os.sep)
-    )
+    if logo_url.startswith("/uploads/"):
+        logo_path = os.path.join(
+            app.config["UPLOAD_FOLDER"],
+            secure_filename(logo_url.removeprefix("/uploads/")),
+        )
+    elif logo_url.startswith("/static/"):
+        logo_path = os.path.join(
+            app.root_path, logo_url.lstrip("/").replace("/", os.sep)
+        )
+    else:
+        workbook_stream.seek(0)
+        return workbook_stream
     extension = os.path.splitext(logo_path)[1].lower().lstrip(".")
     image_types = {
         "png": "image/png",
@@ -1152,10 +1275,19 @@ def login():
     if request.method == "POST":
         with get_db() as conn:
             teacher = conn.execute(
-                "SELECT * FROM teachers WHERE username = ? AND password = ?",
-                (request.form.get("username"), request.form.get("password")),
+                "SELECT * FROM teachers WHERE username = ?",
+                (request.form.get("username"),),
             ).fetchone()
-        if teacher:
+            supplied_password = request.form.get("password") or ""
+            if teacher and verify_password(teacher["password"], supplied_password):
+                if not password_is_hashed(teacher["password"]):
+                    conn.execute(
+                        "UPDATE teachers SET password = ? WHERE id = ?",
+                        (generate_password_hash(supplied_password), teacher["id"]),
+                    )
+        if teacher and verify_password(teacher["password"], supplied_password):
+            session.clear()
+            session.permanent = True
             session["teacher_logged_in"] = True
             session["teacher_id"] = teacher["id"]
             session["teacher_name"] = teacher["full_name"]
@@ -1167,16 +1299,60 @@ def login():
     return render_template("login.html")
 
 
-@app.route("/logout")
+@app.route("/change-password", methods=["GET", "POST"])
+@role_required(
+    "admin", "finance_officer", "registrar", "exam_officer", "teacher", "super_admin"
+)
+def change_password():
+    if request.method == "POST":
+        current_password = request.form.get("current_password") or ""
+        new_password = request.form.get("new_password") or ""
+        confirm_password = request.form.get("confirm_password") or ""
+        with get_db() as conn:
+            teacher = conn.execute(
+                "SELECT password FROM teachers WHERE id = ?",
+                (session.get("teacher_id"),),
+            ).fetchone()
+            if not teacher or not verify_password(
+                teacher["password"], current_password
+            ):
+                flash("The current password was not accepted.")
+                return redirect(url_for("change_password"))
+            if len(new_password) < 12:
+                flash("Choose a password with at least 12 characters.")
+                return redirect(url_for("change_password"))
+            if new_password != confirm_password:
+                flash("The new passwords do not match.")
+                return redirect(url_for("change_password"))
+            conn.execute(
+                "UPDATE teachers SET password = ? WHERE id = ?",
+                (generate_password_hash(new_password), session["teacher_id"]),
+            )
+        session.clear()
+        flash("Password changed. Sign in again with your new password.")
+        return redirect(url_for("login"))
+    return render_template("change_password.html")
+
+
+@app.route("/logout", methods=["POST"])
 def logout():
     session.clear()
     flash("You have signed out.")
     return redirect(url_for("login"))
 
 
-@app.route("/switch-school/<int:school_id>")
+@app.route("/uploads/<path:filename>")
+def uploaded_asset(filename: str):
+    return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
+
+
+@app.route("/switch-school", methods=["POST"])
 @role_required("super_admin")
-def switch_school(school_id: int):
+def switch_school():
+    try:
+        school_id = int(request.form.get("school_id", ""))
+    except ValueError:
+        abort(400, description="Select a valid school.")
     teacher_id = session.get("teacher_id")
     if not teacher_can_manage_school(teacher_id, school_id):
         flash("You are not allowed to switch to that school.")
@@ -1726,7 +1902,7 @@ def teachers():
         with get_db() as conn:
             conn.execute(
                 "INSERT INTO teachers (username, password, full_name, school_id, role) VALUES (?, ?, ?, ?, ?)",
-                (username, password, full_name, school_id, role),
+                (username, generate_password_hash(password), full_name, school_id, role),
             )
         flash("Teacher account added successfully.")
         return redirect(url_for("teachers"))
@@ -2414,14 +2590,14 @@ def settings():
                 filename = secure_filename(file.filename)
                 path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
                 file.save(path)
-                logo_url = f"/static/uploads/{filename}"
+                logo_url = url_for("uploaded_asset", filename=filename)
         if "signature_file" in request.files:
             file = request.files["signature_file"]
             if file and file.filename:
                 filename = secure_filename(file.filename)
                 path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
                 file.save(path)
-                signature_url = f"/static/uploads/{filename}"
+                signature_url = url_for("uploaded_asset", filename=filename)
         with get_db() as conn:
             conn.execute(
                 "UPDATE schools SET name = ?, motto = ?, logo_url = ?, signature_url = ?, report_template = ? WHERE id = ?",
@@ -2441,4 +2617,4 @@ def settings():
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=APP_ENV == "development")

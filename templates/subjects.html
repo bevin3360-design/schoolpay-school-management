@@ -5,6 +5,7 @@
 <div class="card">
   <h2>Add Learning Area</h2>
   <form method="post" class="form-grid">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label>Learning area name<input name="name" required></label>
     <label>Short name<input name="short_name"></label>
     <label>Grade level
@@ -31,6 +32,7 @@
 <div class="card">
   <h2>Assign learning areas to teachers</h2>
   <form method="post" action="{{ url_for('teacher_assignments') }}" class="form-grid">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label>Teacher<select name="teacher_id" required><option value="">Select teacher</option>{% for teacher in teachers %}<option value="{{ teacher.id }}">{{ teacher.full_name }}</option>{% endfor %}</select></label>
     <label>Learning area<select name="subject_id" required><option value="">Select learning area</option>{% for subject in subjects %}<option value="{{ subject.id }}">{{ subject.name }}</option>{% endfor %}</select></label>
     <label>Grade

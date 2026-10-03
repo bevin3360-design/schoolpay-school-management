@@ -3,6 +3,7 @@
 <div class="card">
   <h2>Edit Student</h2>
   <form method="post" class="form-grid">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label>Admission number<input name="admission_number" value="{{ student.admission_number }}" required></label>
     <label>Full name<input name="full_name" value="{{ student.full_name }}" required></label>
     <label>Gender<select name="gender"><option {% if student.gender == 'Female' %}selected{% endif %}>Female</option><option {% if student.gender == 'Male' %}selected{% endif %}>Male</option></select></label>

@@ -40,6 +40,7 @@ def test_report_template_selection_is_grade_specific():
 
 def test_school_switch_updates_session(tmp_path, monkeypatch):
     monkeypatch.setattr(app_module, "DB_PATH", str(tmp_path / "switch.db"))
+    app.config["TESTING"] = True
     app_module.init_db()
     client = app.test_client()
     with client.session_transaction() as session:
@@ -47,7 +48,11 @@ def test_school_switch_updates_session(tmp_path, monkeypatch):
         session["teacher_id"] = 1
         session["school_id"] = 1
 
-    response = client.get("/switch-school/1", follow_redirects=True)
+    response = client.post(
+        "/switch-school",
+        data={"school_id": "1"},
+        follow_redirects=True,
+    )
     assert response.status_code == 200
     with client.session_transaction() as session:
         assert session["school_id"] == 1

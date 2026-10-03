@@ -6,6 +6,7 @@
   <p>Each item is charged once to every learner currently enrolled in the selected grade. New learners need to be charged when they join.</p>
   {% if grades %}
   <form method="post" class="form-grid">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label>Grade
       <select name="grade" required>
         {% for grade in grades %}<option value="{{ grade.grade }}">{{ grade.grade }}</option>{% endfor %}
@@ -34,7 +35,7 @@
         <td>{{ item.name }}</td>
         <td>KSh {{ "{:,}".format(item.amount) }}</td>
         <td>{{ item.learners_charged }}</td>
-        <td><form method="post" action="{{ url_for('apply_fee_item', fee_item_id=item.id) }}"><button type="submit">Apply to new learners</button></form></td>
+        <td><form method="post" action="{{ url_for('apply_fee_item', fee_item_id=item.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Apply to new learners</button></form></td>
       </tr>
       {% else %}
       <tr><td colspan="7">No fee items have been set up.</td></tr>

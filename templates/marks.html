@@ -5,6 +5,7 @@
   <h2>Import an exam spreadsheet</h2>
   <p>Download the branded template from Exam Management, enter each score from 0 to 100, then upload the .xlsx file here. The workbook calculates CBE grades and points.</p>
   <form method="post" enctype="multipart/form-data" class="form-grid">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label>Exam<select name="exam_id" required>
       <option value="">Select exam</option>{% for exam in exams %}<option value="{{ exam.id }}">{{ exam.name }} ({{ exam.term }} · {{ exam.grade_level }})</option>{% endfor %}
     </select></label>
@@ -17,6 +18,7 @@
   <h2>Enter marks</h2>
   {% if students and subjects and exams %}
   <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label>Exam
       <select name="exam_id" required>
         <option value="">Select exam</option>
