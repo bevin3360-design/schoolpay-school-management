@@ -36,6 +36,44 @@ storing real learner or payment records. Real deployments also need an
 appropriate production WSGI server and a host plan that supports persistent
 storage.
 
+## Free public demo on PythonAnywhere
+
+The checked-in `deploy/pythonanywhere_wsgi.example.py` is a **demo-only**
+PythonAnywhere WSGI configuration. It stores its empty demo database and
+uploads in the account home directory rather than the application checkout.
+The free plan has limited capacity and no production SLA or managed backup.
+Keep this deployment on fake data; do not use it for learner, parent, or
+payment records. Arrange and test off-site backups before considering any real
+data deployment.
+
+1. Create a free account at <https://www.pythonanywhere.com/> and open a Bash
+   console.
+2. Clone the public demo branch and install the app dependencies:
+
+   ```bash
+   git clone --branch deploy/pythonanywhere-demo https://github.com/bevin3360-design/schoolpay-school-management.git
+   mkvirtualenv --python=/usr/bin/python3.13 schoolpay-demo
+   pip install -r ~/schoolpay-school-management/requirements.txt
+   ```
+
+3. In the **Web** tab, add a **Manual configuration** web app using Python 3.13,
+   set its virtualenv to `schoolpay-demo`, and open the WSGI configuration file.
+4. Copy the contents of `deploy/pythonanywhere_wsgi.example.py` into that WSGI
+   file. Replace the username and demo login placeholders. Generate a unique
+   secret key in a Bash console with
+   `python -c 'import secrets; print(secrets.token_hex(32))'`; use that output
+   as `secret_key`. Do not put real credentials in the repository.
+5. Save the WSGI file, reload the web app in the Web tab, and open the
+   `your-username.pythonanywhere.com` address shown there. Sign in with the
+   demo account you configured and change its password immediately.
+6. Once the initial deployment succeeds, change `initial_admin_password` to
+   an empty string in the WSGI file and reload. The app only needs the initial
+   admin password when creating a new, empty database.
+
+To publish later code changes, pull the `deploy/pythonanywhere-demo` branch in
+the Bash console and reload the web app. Keep the `.local/share/schoolpay-demo`
+directory and its database outside the cloned source directory.
+
 ## Run tests
 
 ```powershell
